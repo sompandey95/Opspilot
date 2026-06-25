@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: opspilot
+      POSTGRES_USER: opspilot
+      POSTGRES_PASSWORD: opspilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8100:8000"
+    volumes:
+      - chromadata:/chroma/chroma
+
+volumes:
+  pgdata:
+  chromadata:

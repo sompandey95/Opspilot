@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opspilot"
+version = "0.1.0"
+description = "OpsPilot service scaffold"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic-settings",
+    "asyncpg",
+    "sqlalchemy[asyncio]",
+    "redis[hiredis]",
+    "chromadb==1.5.9",
+    "openai",
+    "tiktoken",
+    "rank-bm25",
+    "sentence-transformers",
+    "alembic",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
