@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     MODEL_JUDGE: str = ""
     MODEL_VERIFIER: str = ""
     MODEL_GUARDRAILS: str = ""
+    MODEL_SUMMARIZER: str = "gpt-5.4-mini"
+    MODEL_QUERY_REWRITER: str = "gpt-5.4-mini"
 
     EMBEDDING_MODEL: str = "text-embedding-3-large"
     EMBEDDING_DIMENSIONS: int = 3072
@@ -37,6 +39,7 @@ class Settings(BaseSettings):
 
     HITL_HIGH_RISK_ACTIONS: list[str] = Field(default_factory=list)
     HITL_REFUND_AUTO_APPROVE_LIMIT: float = 500.0
+    HITL_APPROVAL_TIMEOUT_MINUTES: int = 30
     RATE_LIMIT_PER_MINUTE: int = 60
 
     JIRA_BASE_URL: str = ""
@@ -48,6 +51,7 @@ class Settings(BaseSettings):
 
     EVAL_FAITHFULNESS_THRESHOLD: float = 0.90
     EVAL_HALLUCINATION_MAX: float = 0.05
+    EVAL_HALLUCINATION_MAX_RATE: float = 0.05
     EVAL_RETRIEVAL_PRECISION_THRESHOLD: float = 0.85
 
     ENABLE_CHAIN_OF_VERIFICATION: bool = True
