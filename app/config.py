@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     RERANK_TOP_K: int = 5
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
+    DEDUP_SIMILARITY_THRESHOLD: float = 0.95
 
     MAX_AGENT_STEPS: int = 10
     AGENT_TIMEOUT_SECONDS: int = 45

@@ -79,11 +79,28 @@ async def _init_rag(app: FastAPI) -> None:
     logger.info("RAG retriever ready")
 
 
+def _init_tools(app: FastAPI) -> None:
+    """Build the tool registry + schema validator on app.state (fault-tolerant)."""
+    app.state.tool_registry = None
+    app.state.schema_validator = None
+    try:
+        from app.guardrails.schemas import SchemaValidator
+        from app.tools.registry import build_default_registry
+
+        registry = build_default_registry(get_settings(), retriever=app.state.retriever)
+        app.state.tool_registry = registry
+        app.state.schema_validator = SchemaValidator(registry)
+        logger.info("Tool registry ready: %d tools", len(registry))
+    except Exception as exc:
+        logger.error("Tool registry init failed (%s) — tools disabled", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await init_redis()
     await _init_rag(app)
+    _init_tools(app)
     logger.info("OpsPilot started")
     yield
     await close_db()
