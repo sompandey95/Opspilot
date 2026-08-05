@@ -65,13 +65,22 @@ class Tool(ABC):
     async def execute(self, **kwargs) -> ToolResult:
         ...
 
+    # The OpenAI/Azure tools API rejects schemas with combinators at the top
+    # level. `parameters` may still use them — SchemaValidator applies the full
+    # schema — but the LLM-facing view must drop them.
+    _UNSUPPORTED_TOP_LEVEL_KEYS = ("oneOf", "anyOf", "allOf", "not", "enum", "const")
+
     def get_schema(self) -> dict:
         """OpenAI-compatible tool/function schema."""
+        parameters = {
+            k: v for k, v in self.parameters.items()
+            if k not in self._UNSUPPORTED_TOP_LEVEL_KEYS
+        }
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters,
+                "parameters": parameters,
             },
         }

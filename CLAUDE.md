@@ -52,15 +52,31 @@ Health check: `GET /api/v1/health` · Retrieval debug: `GET /api/v1/rag/test?que
   LLM/network calls are mocked; order-service tools are tested against the real
   mock app via `httpx.ASGITransport`.
 
-## Current state (Phases 1–3 complete)
+## Current state (Phases 1–4 complete)
 
 ```
 app/
   config.py                 # Settings (Azure OpenAI, RAG, agent, HITL, eval knobs)
-  main.py                   # lifespan: db, redis, RAG init (fault-tolerant)
-  api/routes.py             # /health, /chat (stub), /rag/test
+  main.py                   # lifespan: db, redis, RAG, tools, agent init (fault-tolerant)
+  api/routes.py             # /health, /chat (wired: intent → route → agent), /rag/test
   db/postgres.py, redis.py
   observability/models.py   # DDL: traces, hitl_audit_log, eval_runs
+  observability/trace.py    # Trace object: step recording + best-effort persist to traces
+  llm/client.py             # LLMClient: role → Azure deployment, normalized LLMResponse,
+                            # per-call timeout, usage capture (all LLM access goes here)
+  agent/
+    prompts/                # v1_system.txt + current.txt symlink; version → trace rows
+    prompt_loader.py        # load_current_prompt() → (text, version)
+    intent_classifier.py    # GPT-5.4-mini JSON classifier; never raises — falls back
+                            # to action_complex + regex order-ID extraction
+    model_router.py         # static ROUTING_TABLE (escalate → no LLM)
+    confidence.py           # deterministic 0–1 scorer (retrieval/tools/consistency)
+    react_agent.py          # ReAct loop: schema-validated tool calls with retry-on-error,
+                            # proper tool_call_id message pairing, Redis idempotency
+                            # (sha256 args key, TTL 24h, success-only caching), max-steps
+                            # escalation, low-confidence escalation.
+                            # AutoApproveHITLGate = the PHASE 5 SEAM (auto-approves HIGH
+                            # risk, records decision on trace) — replace with app/hitl/gate.
   rag/
     chunker.py              # SmartChunker: faq/policy/ticket/api_doc/changelog aware
     embedder.py             # AzureEmbedder (batch 16)
@@ -93,6 +109,10 @@ mock_services/order_service/
                             # refund, cancel, customer search
 knowledge_base/             # faqs/ policies/ tickets/ api_docs/ changelogs/
 scripts/ingest_knowledge.py # chunk → embed → dedup → upsert
+frontend/index.html         # self-contained dev console: chat tester, animated
+                            # pipeline explainer, trace timeline, RAG explorer.
+                            # Uses dev endpoints GET /api/v1/traces/{id} and
+                            # /rag/test; CORS is dev-open until Phase 5.
 ```
 
 **Pinned mock orders** (eval scenarios MUST only reference these or other seeded
@@ -119,7 +139,7 @@ semantic-dedup extras → reduce Hindi-English scenarios to 3–5 → session ma
 becomes last-N-turns-only → output guard becomes PII-scrub-only.
 **Never cut:** eval harness, HITL, core agent, retrieval.
 
-## Phase 4 — Agent core (~5 days)  ← NEXT
+## Phase 4 — Agent core — ✅ DONE (2026-08-04)
 
 Build in this order; each step keeps the app runnable.
 
@@ -155,7 +175,7 @@ Build in this order; each step keeps the app runnable.
    (scripted fake LLM: tool call → observation → answer; malformed-args retry;
    max-steps; idempotent replay).
 
-## Phase 5 — HITL + guardrails (~4 days)
+## Phase 5 — HITL + guardrails (~4 days)  ← NEXT
 
 1. `app/hitl/queue.py` — Postgres approval queue (table exists in DDL:
    `hitl_audit_log`; add a `hitl_pending` table + migration for open requests).

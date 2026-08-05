@@ -95,12 +95,49 @@ def _init_tools(app: FastAPI) -> None:
         logger.error("Tool registry init failed (%s) — tools disabled", exc)
 
 
+def _init_agent(app: FastAPI) -> None:
+    """Build the LLM client, intent classifier, and ReAct agent (fault-tolerant)."""
+    app.state.llm_client = None
+    app.state.intent_classifier = None
+    app.state.react_agent = None
+
+    settings = get_settings()
+    if not (settings.AZURE_OPENAI_API_KEY and settings.AZURE_OPENAI_ENDPOINT):
+        logger.error("Azure OpenAI credentials missing — agent disabled")
+        return
+
+    try:
+        from app.agent.intent_classifier import IntentClassifier
+        from app.agent.react_agent import ReActAgent
+        from app.llm.client import LLMClient
+
+        llm = LLMClient(settings)
+        app.state.llm_client = llm
+        app.state.intent_classifier = IntentClassifier(llm)
+
+        if app.state.tool_registry is None or app.state.schema_validator is None:
+            logger.error("Tool registry unavailable — agent disabled")
+            return
+
+        agent = ReActAgent(
+            llm=llm,
+            tool_registry=app.state.tool_registry,
+            schema_validator=app.state.schema_validator,
+            settings=settings,
+        )
+        app.state.react_agent = agent
+        logger.info("ReAct agent ready (prompt %s)", agent.prompt_version)
+    except Exception as exc:
+        logger.error("Agent init failed (%s) — agent disabled", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     await init_redis()
     await _init_rag(app)
     _init_tools(app)
+    _init_agent(app)
     logger.info("OpsPilot started")
     yield
     await close_db()
@@ -109,6 +146,17 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="OpsPilot", version="0.1.0", lifespan=lifespan)
+
+    # Dev-open CORS so the local frontend console (frontend/index.html) can
+    # call the API from file:// — Phase 5 middleware tightens this.
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(router)
 
     @app.get("/")

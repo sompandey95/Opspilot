@@ -22,7 +22,11 @@ class SearchKnowledgeTool(Tool):
             "doc_type": {
                 "type": "string",
                 "enum": ["faq", "policy", "ticket", "api_doc", "changelog"],
-                "description": "Optional filter to a single document type",
+                "description": (
+                    "Optional filter to a single document type. Dated changelog "
+                    "entries are always included regardless of this filter, "
+                    "because they supersede older policy/FAQ text."
+                ),
             },
         },
         "required": ["query"],
@@ -47,7 +51,13 @@ class SearchKnowledgeTool(Tool):
             return ToolResult(success=False, error=f"Retrieval failed: {exc}")
 
         if doc_type:
-            results = [r for r in results if r.metadata.get("doc_type") == doc_type]
+            # Changelogs are dated corrections that supersede every other doc
+            # type — the stale-knowledge invariant is enforced here, not left
+            # to the LLM's filter choice.
+            results = [
+                r for r in results
+                if r.metadata.get("doc_type") in (doc_type, "changelog")
+            ]
 
         return ToolResult(
             success=True,
