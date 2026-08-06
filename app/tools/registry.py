@@ -51,6 +51,7 @@ def build_default_registry(
     order_client: httpx.AsyncClient | None = None,
     jira_client: httpx.AsyncClient | None = None,
     slack_client: httpx.AsyncClient | None = None,
+    hitl_queue=None,
 ) -> ToolRegistry:
     """
     Register the full tool set. Unconfigured integrations (Jira, Slack) are
@@ -72,6 +73,6 @@ def build_default_registry(
     registry.register(CreateJiraTicketTool(settings, client=jira_client))
     registry.register(UpdateJiraTicketTool(settings, client=jira_client))
     registry.register(SendSlackSummaryTool(settings, client=slack_client))
-    registry.register(EscalateToManagerTool(settings, client=slack_client))
+    registry.register(EscalateToManagerTool(settings, client=slack_client, hitl_queue=hitl_queue))
 
     return registry

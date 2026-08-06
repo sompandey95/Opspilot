@@ -87,12 +87,45 @@ def _init_tools(app: FastAPI) -> None:
         from app.guardrails.schemas import SchemaValidator
         from app.tools.registry import build_default_registry
 
-        registry = build_default_registry(get_settings(), retriever=app.state.retriever)
+        registry = build_default_registry(
+            get_settings(),
+            retriever=app.state.retriever,
+            hitl_queue=getattr(app.state, "hitl_queue", None),
+        )
         app.state.tool_registry = registry
         app.state.schema_validator = SchemaValidator(registry)
         logger.info("Tool registry ready: %d tools", len(registry))
     except Exception as exc:
         logger.error("Tool registry init failed (%s) — tools disabled", exc)
+
+
+def _init_hitl(app: FastAPI) -> None:
+    """Build the HITL queue, notifier, and approval gate (fault-tolerant)."""
+    app.state.hitl_queue = None
+    app.state.hitl_gate = None
+    try:
+        from app.hitl.gate import HITLApprovalGate
+        from app.hitl.notifier import SlackNotifier
+        from app.hitl.queue import HITLQueue
+
+        settings = get_settings()
+        queue = HITLQueue(settings)
+        app.state.hitl_queue = queue
+        app.state.hitl_gate = HITLApprovalGate(queue, SlackNotifier(settings), settings)
+        logger.info("HITL approval gate ready")
+    except Exception as exc:
+        logger.error("HITL init failed (%s) — agent falls back to auto-approve gate", exc)
+
+
+def _init_guards(app: FastAPI) -> None:
+    app.state.output_guard = None
+    try:
+        from app.guardrails.output_guard import OutputGuard
+
+        app.state.output_guard = OutputGuard()
+        logger.info("Output guard ready")
+    except Exception as exc:
+        logger.error("Output guard init failed (%s) — responses unguarded", exc)
 
 
 def _init_agent(app: FastAPI) -> None:
@@ -124,6 +157,7 @@ def _init_agent(app: FastAPI) -> None:
             tool_registry=app.state.tool_registry,
             schema_validator=app.state.schema_validator,
             settings=settings,
+            hitl_gate=getattr(app.state, "hitl_gate", None),
         )
         app.state.react_agent = agent
         logger.info("ReAct agent ready (prompt %s)", agent.prompt_version)
@@ -136,6 +170,8 @@ async def lifespan(app: FastAPI):
     await init_db()
     await init_redis()
     await _init_rag(app)
+    _init_hitl(app)
+    _init_guards(app)
     _init_tools(app)
     _init_agent(app)
     logger.info("OpsPilot started")
@@ -147,17 +183,22 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="OpsPilot", version="0.1.0", lifespan=lifespan)
 
-    # Dev-open CORS so the local frontend console (frontend/index.html) can
-    # call the API from file:// — Phase 5 middleware tightens this.
     from fastapi.middleware.cors import CORSMiddleware
 
+    from app.api.hitl_routes import router as hitl_router
+    from app.api.middleware import APIMiddleware
+
+    # Middleware added later runs first, so add APIMiddleware before CORS:
+    # CORS must be outermost to answer preflight OPTIONS before auth runs.
+    app.add_middleware(APIMiddleware)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=get_settings().CORS_ALLOW_ORIGINS,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     app.include_router(router)
+    app.include_router(hitl_router)
 
     @app.get("/")
     async def root() -> dict:

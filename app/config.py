@@ -41,7 +41,11 @@ class Settings(BaseSettings):
     HITL_HIGH_RISK_ACTIONS: list[str] = Field(default_factory=list)
     HITL_REFUND_AUTO_APPROVE_LIMIT: float = 500.0
     HITL_APPROVAL_TIMEOUT_MINUTES: int = 30
+    HITL_POLL_INTERVAL_SECONDS: float = 2.0
     RATE_LIMIT_PER_MINUTE: int = 60
+    OPSPILOT_API_KEY: str = ""  # empty = auth disabled (local dev)
+    INPUT_MAX_QUERY_LENGTH: int = 4000
+    CORS_ALLOW_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
 
     JIRA_BASE_URL: str = ""
     JIRA_EMAIL: str = ""

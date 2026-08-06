@@ -1,8 +1,12 @@
 """Escalation tool — hands the conversation to a human supervisor.
 
-Phase 3 implementation: logs the escalation and notifies Slack when
-configured. Phase 5 MUST rewire this to insert into the real HITL queue
-(app/hitl/queue.py) so pending escalations are tracked in PostgreSQL.
+Phase 5: escalations are tracked as pending rows in the HITL queue
+(app/hitl/queue.py) so supervisors see them in GET /api/v1/hitl/pending, and
+Slack is notified when configured. If the queue is unavailable the tool
+degrades to Slack + logs only — an escalation must never fail outright.
+
+Note: this tool is HIGH risk but the HITL gate deliberately auto-approves it —
+executing it *is* the act of requesting human review; gating it would deadlock.
 """
 from __future__ import annotations
 
@@ -53,9 +57,15 @@ class EscalateToManagerTool(Tool):
         "required": ["reason", "summary"],
     }
 
-    def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        client: httpx.AsyncClient | None = None,
+        hitl_queue=None,
+    ) -> None:
         self._webhook_url = settings.SLACK_WEBHOOK_URL
         self._client = client
+        self._queue = hitl_queue
 
     async def execute(
         self,
@@ -64,6 +74,24 @@ class EscalateToManagerTool(Tool):
         customer_identifier: str | None = None,
     ) -> ToolResult:
         escalation_id = f"ESC-{uuid.uuid4().hex[:8]}"
+        queued_in_hitl = False
+
+        if self._queue is not None:
+            try:
+                escalation_id = await self._queue.create(
+                    tool_name=self.name,
+                    tool_args={
+                        "reason": reason,
+                        "summary": summary,
+                        "customer_identifier": customer_identifier,
+                    },
+                    risk_level=self.risk_level.value,
+                    agent_reasoning=summary,
+                )
+                queued_in_hitl = True
+            except Exception as exc:
+                logger.error("HITL queue insert failed for escalation: %s", exc)
+
         logger.warning(
             "Escalation %s: reason=%s customer=%s summary=%s",
             escalation_id, reason, customer_identifier, summary,
@@ -85,5 +113,10 @@ class EscalateToManagerTool(Tool):
 
         return ToolResult(
             success=True,
-            data={"escalation_id": escalation_id, "reason": reason, "status": "queued"},
+            data={
+                "escalation_id": escalation_id,
+                "reason": reason,
+                "status": "queued",
+                "in_hitl_queue": queued_in_hitl,
+            },
         )

@@ -4,8 +4,9 @@ Safety properties baked in:
 - max MAX_AGENT_STEPS iterations, per-step LLM timeout
 - every tool call validated against its JSON schema; malformed calls are fed
   back as tool errors so the agent self-corrects instead of crashing
-- HITL gate seam before high-risk execution (Phase 4 stub auto-approves and
-  audits; Phase 5 swaps in the real approval queue — see AutoApproveHITLGate)
+- HITL gate before every risky tool execution: app.hitl.gate.HITLApprovalGate
+  applies the risk matrix (HIGH blocks for human approval); AutoApproveHITLGate
+  remains as the no-DB fallback
 - idempotency for state-changing tools via Redis (prevents double refunds)
 - low confidence or exhausted steps ⇒ escalate, never guess
 """
@@ -75,19 +76,18 @@ class HITLGate(Protocol):
 
 
 class AutoApproveHITLGate:
-    """PHASE 5 SEAM — replace with app.hitl.gate.
-
-    Phase 4 stub: auto-approves every high-risk action but still records the
-    decision on the trace so the audit shape is already in place.
-    """
+    """Fallback gate used when the real one (app.hitl.gate.HITLApprovalGate)
+    can't be built — e.g. tests, or Postgres missing at startup. Auto-approves
+    everything but still records the decision on the trace."""
 
     async def request_approval(
         self, tool: Tool, args: dict, trace: Trace
     ) -> ApprovalDecision:
-        logger.warning(
-            "HITL stub auto-approving high-risk tool '%s' (Phase 5 will gate this)",
-            tool.name,
-        )
+        if tool.risk_level == RiskLevel.HIGH:
+            logger.warning(
+                "AutoApproveHITLGate approving high-risk tool '%s' without human review",
+                tool.name,
+            )
         return ApprovalDecision(status=ApprovalStatus.APPROVED, reason="phase4_stub_auto_approve")
 
 
@@ -251,9 +251,14 @@ class ReActAgent:
 
         tool = self._registry.get(tool_call.name)
 
-        if tool.risk_level == RiskLevel.HIGH:
+        if tool.risk_level != RiskLevel.NONE:
+            # The gate implements the full risk matrix (LOW/MEDIUM auto-approve
+            # with audit, HIGH blocks for a human). Auto-approvals of sub-HIGH
+            # tools are audited in Postgres but don't mark the trace as
+            # HITL-triggered — that flag means "a human was in the loop".
             decision = await self._hitl_gate.request_approval(tool, args, trace)
-            trace.add_hitl_decision(step, tool.name, decision.status.value, decision.reason)
+            if tool.risk_level == RiskLevel.HIGH or decision.status != ApprovalStatus.APPROVED:
+                trace.add_hitl_decision(step, tool.name, decision.status.value, decision.reason)
             if decision.status == ApprovalStatus.REJECTED:
                 return (
                     "Action was rejected by a supervisor. "

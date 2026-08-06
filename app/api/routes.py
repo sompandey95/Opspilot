@@ -87,6 +87,21 @@ async def chat(body: ChatRequest, request: Request) -> dict:
 
     result = await agent.run(body.query, intent, session_id=body.session_id)
 
+    # Input-guard flags (PII masking) were stashed by the middleware.
+    guardrail_flags = list(getattr(request.state, "guardrail_flags", []) or [])
+
+    response_text = result.response
+    output_guard = getattr(request.app.state, "output_guard", None)
+    if output_guard is not None:
+        guarded = output_guard.check(response_text, result.trace, sentiment=intent.sentiment)
+        response_text = guarded.response
+        guardrail_flags.extend(guarded.flags)
+
+    if guardrail_flags:
+        result.trace.add_guardrail_flags(guardrail_flags)
+        if response_text != result.response:
+            result.trace.set_response(response_text)
+
     # Direct intent-escalations still notify a human (best-effort).
     if result.escalated and intent.intent.value == "escalate":
         registry = getattr(request.app.state, "tool_registry", None)
@@ -102,7 +117,7 @@ async def chat(body: ChatRequest, request: Request) -> dict:
     await result.trace.persist()
 
     return {
-        "response": result.response,
+        "response": response_text,
         "trace_id": result.trace.trace_id,
         "intent": intent.intent.value,
         "confidence": result.confidence,

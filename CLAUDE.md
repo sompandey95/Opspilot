@@ -52,15 +52,38 @@ Health check: `GET /api/v1/health` · Retrieval debug: `GET /api/v1/rag/test?que
   LLM/network calls are mocked; order-service tools are tested against the real
   mock app via `httpx.ASGITransport`.
 
-## Current state (Phases 1–4 complete)
+## Current state (Phases 1–5 complete)
 
 ```
 app/
   config.py                 # Settings (Azure OpenAI, RAG, agent, HITL, eval knobs)
-  main.py                   # lifespan: db, redis, RAG, tools, agent init (fault-tolerant)
-  api/routes.py             # /health, /chat (wired: intent → route → agent), /rag/test
+  main.py                   # lifespan: db, redis, RAG, hitl, guards, tools, agent
+                            # (fault-tolerant); middleware order: CORS outside APIMiddleware
+  api/routes.py             # /health, /chat (intent → route → agent → output guard), /rag/test
+  api/hitl_routes.py        # POST /hitl/approve/{id}, /hitl/reject/{id} (409 on
+                            # double-decide), GET /hitl/pending
+  api/middleware.py         # pure-ASGI: X-Request-ID, API-key auth (off when
+                            # OPSPILOT_API_KEY empty), Redis sliding-window rate
+                            # limit (fails open), input guard on /chat (rewrites
+                            # body with PII masked; blocks injection/overlength)
   db/postgres.py, redis.py
-  observability/models.py   # DDL: traces, hitl_audit_log, eval_runs
+  hitl/
+    queue.py                # Postgres hitl_pending queue: create / poll
+                            # wait_for_decision / decide (single transition;
+                            # timed-out rows stay pending for late decisions);
+                            # audits human decisions
+    gate.py                 # HITLApprovalGate risk matrix: NONE/LOW auto,
+                            # MEDIUM auto+audit+Slack, HIGH block-for-approval.
+                            # Overrides: refund ≤ ₹500 w/ explicit amount →
+                            # MEDIUM, > limit or no amount → HIGH; confidence
+                            # < 0.7 forces HIGH; escalate_to_manager never gated
+                            # (it queues human review itself). Fails closed
+                            # (queue down ⇒ REJECTED). Audits auto decisions.
+    notifier.py             # Slack webhook messages (best-effort, never raises)
+  guardrails/ (see below)
+  observability/models.py   # DDL: traces, hitl_audit_log (trace_id FK dropped in
+                            # 0002 — audit rows precede trace persist), hitl_pending,
+                            # eval_runs
   observability/trace.py    # Trace object: step recording + best-effort persist to traces
   llm/client.py             # LLMClient: role → Azure deployment, normalized LLMResponse,
                             # per-call timeout, usage capture (all LLM access goes here)
@@ -74,9 +97,10 @@ app/
     react_agent.py          # ReAct loop: schema-validated tool calls with retry-on-error,
                             # proper tool_call_id message pairing, Redis idempotency
                             # (sha256 args key, TTL 24h, success-only caching), max-steps
-                            # escalation, low-confidence escalation.
-                            # AutoApproveHITLGate = the PHASE 5 SEAM (auto-approves HIGH
-                            # risk, records decision on trace) — replace with app/hitl/gate.
+                            # escalation, low-confidence escalation. Gate is
+                            # consulted for every non-NONE-risk tool; only HIGH
+                            # (or non-approved) decisions set hitl_triggered.
+                            # AutoApproveHITLGate remains as no-DB/test fallback.
   rag/
     chunker.py              # SmartChunker: faq/policy/ticket/api_doc/changelog aware
     embedder.py             # AzureEmbedder (batch 16)
@@ -95,10 +119,19 @@ app/
     customer_tool.py        # search_customer (low)
     jira_tool.py            # create/update_jira_ticket (medium, state-changing)
     slack_tool.py           # send_slack_summary (low, state-changing)
-    escalate_tool.py        # escalate_to_manager (HIGH) — Slack notify now;
-                            # Phase 5 must wire it to the real HITL queue
+    escalate_tool.py        # escalate_to_manager (HIGH) — inserts into HITL
+                            # queue (visible in /hitl/pending) + Slack notify;
+                            # degrades to Slack/logs-only if queue unavailable
   guardrails/
     schemas.py              # SchemaValidator — jsonschema check of tool args
+    input_guard.py          # length cap, Indian PII masking (card→aadhaar→PAN→UPI
+                            # order matters; UPI = @-handle with no dotted TLD so
+                            # emails pass), injection-signal blocklist
+    output_guard.py         # PII scrub of response; flags claims (₹, ISO dates,
+                            # day/week windows, %) not grounded in query+tool
+                            # results; tone check on angry turns. Flags only —
+                            # never rewrites answers (except PII). Flags land in
+                            # traces.guardrail_flags
 mock_services/order_service/
   models.py                 # Pydantic models + enums (deviation: PDF said SQLAlchemy;
                             # we use deterministic in-memory store instead — simpler,
@@ -112,7 +145,8 @@ scripts/ingest_knowledge.py # chunk → embed → dedup → upsert
 frontend/index.html         # self-contained dev console: chat tester, animated
                             # pipeline explainer, trace timeline, RAG explorer.
                             # Uses dev endpoints GET /api/v1/traces/{id} and
-                            # /rag/test; CORS is dev-open until Phase 5.
+                            # /rag/test; CORS origins now via CORS_ALLOW_ORIGINS
+                            # (default * for local dev).
 ```
 
 **Pinned mock orders** (eval scenarios MUST only reference these or other seeded
@@ -175,7 +209,29 @@ Build in this order; each step keeps the app runnable.
    (scripted fake LLM: tool call → observation → answer; malformed-args retry;
    max-steps; idempotent replay).
 
-## Phase 5 — HITL + guardrails (~4 days)  ← NEXT
+## Phase 5 — HITL + guardrails — ✅ DONE (2026-08-05)
+
+Delivered as specced, with these deviations/decisions:
+- `hitl_audit_log.trace_id` FK dropped (migration `0002`): audit rows are
+  written mid-run, before the trace row exists.
+- Timed-out approval requests stay `pending` (customer gets the
+  pending-approval reply; a human can still decide later; `decide()` is a
+  single `pending → approved|rejected` transition, 409 on repeats).
+- Exactly one audit row per decision: gate audits auto-approvals/timeouts,
+  `HITLQueue.decide` audits human decisions.
+- The gate is consulted for all non-NONE tools (matrix lives in the gate);
+  `escalate_to_manager` is auto-approved by design — executing it *is* the
+  human-review request, gating it would deadlock.
+- Refund override: explicit `amount_inr` ≤ ₹500 → MEDIUM (auto+audit+Slack);
+  above the limit *or no explicit amount* → HIGH.
+- Middleware is pure ASGI (body rewrite for PII masking needs `receive`
+  control); rate limiter fails open, auth and gate fail closed.
+- New knobs: `OPSPILOT_API_KEY` (empty = auth off), `HITL_POLL_INTERVAL_SECONDS`,
+  `INPUT_MAX_QUERY_LENGTH`, `CORS_ALLOW_ORIGINS`.
+- Tests: `test_hitl_gate.py`, `test_guardrails.py`, `test_middleware.py`,
+  `test_hitl_routes.py`.
+
+Original plan (for reference):
 
 1. `app/hitl/queue.py` — Postgres approval queue (table exists in DDL:
    `hitl_audit_log`; add a `hitl_pending` table + migration for open requests).
@@ -206,7 +262,7 @@ Build in this order; each step keeps the app runnable.
     timeout), `test_guardrails.py` (each PII pattern masks, adversarial strings
     from PDF eval scenarios block, clean queries pass).
 
-## Phase 6 — Sessions, budget, observability (~4 days)
+## Phase 6 — Sessions, budget, observability (~4 days)  ← NEXT
 
 1. `app/session/manager.py` — Redis history `session:{id}`, TTL 2h.
 2. `app/session/context_window.py` + `summarizer.py` — tiktoken count; over

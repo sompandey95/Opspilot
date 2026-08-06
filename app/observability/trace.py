@@ -22,9 +22,10 @@ _INSERT_SQL = """
 INSERT INTO traces (
     id, session_id, query, intent, model, steps, response, confidence,
     total_latency_ms, total_tokens, input_tokens, output_tokens,
-    hitl_triggered, escalated, prompt_version
+    hitl_triggered, escalated, prompt_version, guardrail_flags
 ) VALUES (
-    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $16::jsonb
 )
 """
 
@@ -42,6 +43,7 @@ class Trace:
     confidence: float | None = None
     escalated: bool = False
     hitl_triggered: bool = False
+    guardrail_flags: list[str] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
     _started: float = field(default_factory=time.perf_counter, repr=False)
@@ -124,6 +126,9 @@ class Trace:
         self.escalated = True
         self.steps.append({"type": "escalation", "reason": reason, "detail": detail})
 
+    def add_guardrail_flags(self, flags: list[str]) -> None:
+        self.guardrail_flags.extend(flags)
+
     def set_confidence(self, confidence: float) -> None:
         self.confidence = round(confidence, 3)
 
@@ -174,6 +179,7 @@ class Trace:
                 self.hitl_triggered,
                 self.escalated,
                 self.prompt_version,
+                json.dumps(self.guardrail_flags) if self.guardrail_flags else None,
             )
         except Exception as exc:
             logger.error("Failed to persist trace %s: %s", self.trace_id, exc)

@@ -358,17 +358,37 @@ async def test_hitl_timeout_returns_pending(registry, settings):
     assert not result.escalated
 
 
-async def test_low_risk_tools_skip_the_gate(registry, settings):
+async def test_none_risk_tools_skip_the_gate(registry, settings):
     class ExplodingGate:
         async def request_approval(self, tool, args, trace):
-            raise AssertionError("gate must not be called for low-risk tools")
+            raise AssertionError("gate must not be called for zero-risk tools")
+
+    llm = ScriptedLLM([
+        tool_call("search_knowledge", {"query": "return window"}),
+        answer("The return window is 7 days."),
+    ])
+    agent = make_agent(llm, registry, settings, hitl_gate=ExplodingGate())
+    result = await agent.run("what's the return window?", intent(IntentType.FAQ))
+    assert not result.trace.hitl_triggered
+
+
+async def test_low_risk_auto_approval_not_recorded_as_hitl(registry, settings):
+    """LOW-risk tools now pass through the gate (audit happens there), but an
+    auto-approval must not mark the trace as HITL-triggered."""
+    calls = []
+
+    class RecordingGate:
+        async def request_approval(self, tool, args, trace):
+            calls.append(tool.name)
+            return ApprovalDecision(status=ApprovalStatus.APPROVED, reason="auto")
 
     llm = ScriptedLLM([
         tool_call("check_order_status", {"order_id": "ORD-2024-55001"}),
         answer("Delayed."),
     ])
-    agent = make_agent(llm, registry, settings, hitl_gate=ExplodingGate())
+    agent = make_agent(llm, registry, settings, hitl_gate=RecordingGate())
     result = await agent.run("status?", intent())
+    assert calls == ["check_order_status"]
     assert not result.trace.hitl_triggered
 
 
