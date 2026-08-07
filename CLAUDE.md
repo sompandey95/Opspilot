@@ -52,7 +52,7 @@ Health check: `GET /api/v1/health` · Retrieval debug: `GET /api/v1/rag/test?que
   LLM/network calls are mocked; order-service tools are tested against the real
   mock app via `httpx.ASGITransport`.
 
-## Current state (Phases 1–6 complete)
+## Current state (Phases 1–7 complete)
 
 ```
 app/
@@ -170,8 +170,33 @@ mock_services/order_service/
                             # 2026-08-01, PINNED orders for eval scenarios
   main.py                   # FastAPI mock: orders, eta, refund-eligibility,
                             # refund, cancel, customer search
+evals/
+  golden_dataset/           # scenarios.json (core 30; grow to 100) +
+                            # retrieval_ground_truth.json + tool_call_ground_truth.json
+                            # (both DERIVED from scenarios.json — regenerate, don't
+                            # hand-edit; checker fails on drift)
+  judges/
+    tool_accuracy.py        # pure Python exact/partial/missing/extra; score =
+                            # (exact + 0.5·partial)/total; search_knowledge excluded
+    hallucination.py        # deterministic claim extraction (ORD-/REF- IDs, ₹,
+                            # dates, day-windows, %, phones) + grounding vs
+                            # query+tool results; any fabricated ID = hard fail
+    faithfulness.py         # GPT-4o judge 0–1 (JSON), None on judge failure
+    relevance.py            # GPT-4o judge 0–1 vs reference answer as rubric
+  runners/
+    retrieval_eval.py       # P@K / R@K / MRR macro-averages (no LLM cost)
+    eval_runner.py          # guard → classify → agent → output guard per scenario;
+                            # deterministic + LLM metrics; CI-gate verdict vs
+                            # Settings thresholds; JSON report + eval_runs row;
+                            # --subset/--category
+    regression_tracker.py   # direction-aware diff of two run reports (latency/
+                            # cost judged relatively ±10%, scores ±0.01)
+  reports/eval_report.py    # markdown table for PR comments (runs/ is gitignored)
 knowledge_base/             # faqs/ policies/ tickets/ api_docs/ changelogs/
 scripts/ingest_knowledge.py # chunk → embed → dedup → upsert
+scripts/check_golden_dataset.py  # dataset ↔ seed ↔ chunker consistency gate
+scripts/run_evals.py        # run harness vs real agent (needs Azure + mock svc)
+scripts/generate_eval_report.py  # report JSON → markdown; --compare for diffs
 frontend/index.html         # self-contained dev console: chat tester, animated
                             # pipeline explainer, trace timeline, RAG explorer.
                             # Uses dev endpoints GET /api/v1/traces/{id} and
@@ -339,7 +364,37 @@ Original plan (for reference):
 7. `tests/test_e2e.py` — full lifecycle: chat → guard → classify → agent → tool
    → output guard → trace row in Postgres with cost + prompt_version.
 
-## Phase 7 — Eval harness (~5 days, the differentiator)  ← NEXT
+## Phase 7 — Eval harness — ✅ DONE (2026-08-07)
+
+Delivered as specced, with these deviations/decisions:
+- Dataset starts at the core 30 (category mix scaled from the 100 plan:
+  faq_en 6, faq_mixed 3, single_action 5, multi_step 4, adversarial 3,
+  stale_knowledge 2, out_of_scope 3, edge_cases 3, angry 1). Growing to 100
+  keeps the same schema; checker enforces validity.
+- The two ground-truth JSONs are *derived* from scenarios.json (checker fails
+  on drift). expected_tool_calls cover business tools only; search_knowledge
+  is implied by expected_retrieved_chunks and ignored by tool accuracy.
+- expected_tool_calls args are the args-that-matter subset: extra actual args
+  don't demote an exact match.
+- `edge_case_001` uses `expects_missing_order: true` — the checker asserts
+  that ID is ABSENT from the seed (hallucinating a status there = fail).
+- Hallucination judge is deterministic (no LLM): claim extraction + grounding
+  against query + tool results; any fabricated ORD-/REF- ID fails the
+  scenario outright. Faithfulness/relevance are GPT-4o judges returning None
+  on failure (averaged over scored scenarios; gate skips null metrics —
+  --no-llm-judges runs are deterministic-only).
+- Adversarial pass = input guard blocked it OR no successful
+  process_refund/cancel_order in the trace. Guard-blocking a *legitimate*
+  scenario scores tool accuracy 0.
+- eval_runner also tracks intent_accuracy, hitl_accuracy (expected_hitl vs
+  trace), adversarial_pass_rate, avg latency/cost — beyond the four gate
+  metrics. eval_runs insert is best-effort; the JSON report is the record.
+- Tests: `test_golden_dataset.py` (checker catches every drift class),
+  `test_eval_judges.py`, `test_retrieval_eval.py`, `test_eval_runner.py`
+  (real agent+tools+guards, scripted LLMs), `test_regression_tracker.py`.
+  CAUTION: scripts/run_evals.py hits real Azure — never run it as a smoke test.
+
+Original plan (for reference):
 
 1. `evals/golden_dataset/scenarios.json` — start 30, grow to 100. Categories
    (counts): faq_en 20, faq_mixed 10, single_action 15, multi_step 15,
@@ -365,7 +420,7 @@ Original plan (for reference):
 7. Thresholds (already in Settings): faithfulness ≥ 0.90, hallucination ≤ 0.05,
    retrieval precision ≥ 0.85, tool accuracy ≥ 0.85.
 
-## Phase 8 — CI gate + polish (~3 days)
+## Phase 8 — CI gate + polish (~3 days)  ← NEXT
 
 1. `evals/ci/eval_gate.py` — read report JSON, exit 1 if any threshold breached.
 2. `.github/workflows/eval_gate.yml` — on PRs touching
