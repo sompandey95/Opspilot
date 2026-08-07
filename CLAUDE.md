@@ -52,14 +52,21 @@ Health check: `GET /api/v1/health` · Retrieval debug: `GET /api/v1/rag/test?que
   LLM/network calls are mocked; order-service tools are tested against the real
   mock app via `httpx.ASGITransport`.
 
-## Current state (Phases 1–5 complete)
+## Current state (Phases 1–6 complete)
 
 ```
 app/
   config.py                 # Settings (Azure OpenAI, RAG, agent, HITL, eval knobs)
-  main.py                   # lifespan: db, redis, RAG, hitl, guards, tools, agent
-                            # (fault-tolerant); middleware order: CORS outside APIMiddleware
-  api/routes.py             # /health, /chat (intent → route → agent → output guard), /rag/test
+  main.py                   # lifespan: logging, db, redis, RAG, hitl, guards, tools,
+                            # agent, sessions/budget/tracer (fault-tolerant);
+                            # middleware order: CORS outside APIMiddleware
+  api/routes.py             # /health, /chat (budget check → session history →
+                            # intent → route → agent → output guard → tracer
+                            # persist → budget record → session save), /rag/test
+  api/admin_routes.py       # GET /admin/traces[?last=24h|7d], /admin/traces/{id},
+                            # /admin/metrics/summary, /admin/metrics/cost-breakdown,
+                            # /admin/hitl/stats, /admin/hitl/pending,
+                            # /admin/evals/latest, /admin/evals/trend?versions=v1,v2
   api/hitl_routes.py        # POST /hitl/approve/{id}, /hitl/reject/{id} (409 on
                             # double-decide), GET /hitl/pending
   api/middleware.py         # pure-ASGI: X-Request-ID, API-key auth (off when
@@ -67,6 +74,25 @@ app/
                             # limit (fails open), input guard on /chat (rewrites
                             # body with PII masked; blocks injection/overlength)
   db/postgres.py, redis.py
+  session/
+    manager.py              # Redis history session:{id}, TTL 2h refreshed on
+                            # touch; stores only user/assistant turns (+ one
+                            # system summary); degrades stateless on Redis loss
+    context_window.py       # tiktoken count (chars/4 fallback if offline);
+                            # ≤ CONTEXT_MAX_TOKENS (12k, inclusive) untouched;
+                            # over ⇒ summary message + last 3 exchanges verbatim
+    summarizer.py           # GPT-5.4-mini summary; deterministic post-check
+                            # re-appends any ORD-/email/phone IDs the model
+                            # dropped; no-LLM fallback = truncated transcript
+  budget/
+    cost_calculator.py      # ₹/1M-token table (Azure list × ₹88/USD); deployment
+                            # name → longest normalised key match; unknown model
+                            # priced at the top tier (over-report, never under);
+                            # per-trace: each llm step by its model, classifier
+                            # remainder at mini rate
+    token_budget.py         # per-org daily/monthly Redis counters (natural TTL
+                            # expiry), 429 when exhausted, 0 = disabled, fails
+                            # open on Redis errors; org = X-Org-Id header
   hitl/
     queue.py                # Postgres hitl_pending queue: create / poll
                             # wait_for_decision / decide (single transition;
@@ -84,6 +110,10 @@ app/
   observability/models.py   # DDL: traces, hitl_audit_log (trace_id FK dropped in
                             # 0002 — audit rows precede trace persist), hitl_pending,
                             # eval_runs
+  observability/tracer.py   # Tracer: cost the trace (CostCalculator) then persist
+  observability/logger.py   # setup_logging(): LOG_LEVEL + LOG_JSON one-line JSON
+  observability/metrics.py  # SQL aggregates: P50/P99 latency, cost by model,
+                            # intent distribution, HITL decision stats, eval trend
   observability/trace.py    # Trace object: step recording + best-effort persist to traces
   llm/client.py             # LLMClient: role → Azure deployment, normalized LLMResponse,
                             # per-call timeout, usage capture (all LLM access goes here)
@@ -262,7 +292,33 @@ Original plan (for reference):
     timeout), `test_guardrails.py` (each PII pattern masks, adversarial strings
     from PDF eval scenarios block, clean queries pass).
 
-## Phase 6 — Sessions, budget, observability (~4 days)  ← NEXT
+## Phase 6 — Sessions, budget, observability — ✅ DONE (2026-08-06)
+
+Delivered as specced, with these deviations/decisions:
+- Session history stores only user/assistant turns (plus at most one system
+  summary) — tool call/observation messages are not persisted.
+- After a turn, the *compacted* history + new exchange is written back, so
+  context-window summaries replace old turns in Redis too.
+- Summariser guarantee is deterministic: a post-check re-appends any ORD-,
+  email, or phone identifiers the LLM summary dropped; with no LLM it falls
+  back to a truncated transcript. Exactly-at-12k-tokens passes untouched.
+- tiktoken (`o200k_base`) with a chars/4 estimate fallback when the encoding
+  can't load (offline CI) — compaction logic identical either way.
+- Pricing: Azure list × ₹88/USD per 1M tokens; deployment-name lookup via
+  longest normalised key match; unknown models priced at the top tier.
+- Budget check runs pre-agent, record post-agent ⇒ can overshoot by one
+  request per org (cost brake, not an invariant). Fails open on Redis loss;
+  org from `X-Org-Id` header, default "default".
+- `traces.cost_inr` now populated (Tracer = cost + persist on top of
+  Trace.persist). Admin routes return 503 on DB loss, 400 on bad windows.
+- New knobs: `SESSION_TTL_SECONDS`, `CONTEXT_MAX_TOKENS`,
+  `CONTEXT_KEEP_LAST_EXCHANGES`, `BUDGET_DAILY_TOKENS`,
+  `BUDGET_MONTHLY_TOKENS`, `LOG_LEVEL`, `LOG_JSON`.
+- Tests: `test_session.py`, `test_budget.py`, `test_admin_routes.py`,
+  `test_e2e.py` (full HTTP lifecycle; Postgres writes captured in-memory, so
+  the suite still needs no live services).
+
+Original plan (for reference):
 
 1. `app/session/manager.py` — Redis history `session:{id}`, TTL 2h.
 2. `app/session/context_window.py` + `summarizer.py` — tiktoken count; over
@@ -283,7 +339,7 @@ Original plan (for reference):
 7. `tests/test_e2e.py` — full lifecycle: chat → guard → classify → agent → tool
    → output guard → trace row in Postgres with cost + prompt_version.
 
-## Phase 7 — Eval harness (~5 days, the differentiator)
+## Phase 7 — Eval harness (~5 days, the differentiator)  ← NEXT
 
 1. `evals/golden_dataset/scenarios.json` — start 30, grow to 100. Categories
    (counts): faq_en 20, faq_mixed 10, single_action 15, multi_step 15,

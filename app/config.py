@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     AGENT_TIMEOUT_SECONDS: int = 45
     CONFIDENCE_THRESHOLD: float = 0.7
 
+    SESSION_TTL_SECONDS: int = 7200
+    CONTEXT_MAX_TOKENS: int = 12000
+    CONTEXT_KEEP_LAST_EXCHANGES: int = 3
+
+    BUDGET_DAILY_TOKENS: int = 500_000     # per org; 0 = unlimited
+    BUDGET_MONTHLY_TOKENS: int = 10_000_000  # per org; 0 = unlimited
+
+    LOG_LEVEL: str = "INFO"
+    LOG_JSON: bool = False
+
     HITL_HIGH_RISK_ACTIONS: list[str] = Field(default_factory=list)
     HITL_REFUND_AUTO_APPROVE_LIMIT: float = 500.0
     HITL_APPROVAL_TIMEOUT_MINUTES: int = 30

@@ -83,9 +83,28 @@ async def chat(body: ChatRequest, request: Request) -> dict:
             },
         )
 
+    # Per-org token budget (org from header; anonymous traffic shares "default")
+    org = request.headers.get("x-org-id", "default")
+    budget = getattr(request.app.state, "token_budget", None)
+    if budget is not None:
+        status = await budget.check(org)
+        if not status.allowed:
+            return JSONResponse(status_code=429, content={"detail": status.reason})
+
+    # Session history, compacted to the context budget
+    history: list[dict] = []
+    session_manager = getattr(request.app.state, "session_manager", None)
+    context_window = getattr(request.app.state, "context_window", None)
+    if body.session_id and session_manager is not None:
+        history = await session_manager.get_history(body.session_id)
+        if history and context_window is not None:
+            history = await context_window.fit(history)
+
     intent = await classifier.classify(body.query)
 
-    result = await agent.run(body.query, intent, session_id=body.session_id)
+    result = await agent.run(
+        body.query, intent, session_id=body.session_id, history=history
+    )
 
     # Input-guard flags (PII masking) were stashed by the middleware.
     guardrail_flags = list(getattr(request.state, "guardrail_flags", []) or [])
@@ -114,7 +133,21 @@ async def chat(body: ChatRequest, request: Request) -> dict:
             except Exception as exc:
                 logger.error("Escalation notification failed: %s", exc)
 
-    await result.trace.persist()
+    tracer = getattr(request.app.state, "tracer", None)
+    if tracer is not None:
+        await tracer.persist(result.trace)  # costs the trace, then persists
+    else:
+        await result.trace.persist()
+
+    if budget is not None:
+        await budget.record(org, result.trace.total_tokens)
+
+    if body.session_id and session_manager is not None:
+        # Store the compacted history + this turn, so the summary written by
+        # the context window replaces the old turns in Redis too.
+        history.append({"role": "user", "content": body.query})
+        history.append({"role": "assistant", "content": response_text})
+        await session_manager.save_history(body.session_id, history)
 
     return {
         "response": response_text,

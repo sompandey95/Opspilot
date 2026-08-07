@@ -99,6 +99,33 @@ def _init_tools(app: FastAPI) -> None:
         logger.error("Tool registry init failed (%s) — tools disabled", exc)
 
 
+def _init_sessions_and_budget(app: FastAPI) -> None:
+    """Session manager, context window, token budget, tracer (fault-tolerant).
+    Runs after _init_agent: the summarizer reuses the agent's LLM client (a
+    missing client just means truncation-style summaries, never a crash)."""
+    app.state.session_manager = None
+    app.state.context_window = None
+    app.state.token_budget = None
+    app.state.tracer = None
+
+    settings = get_settings()
+    try:
+        from app.budget.token_budget import TokenBudget
+        from app.observability.tracer import Tracer
+        from app.session.context_window import ContextWindow
+        from app.session.manager import SessionManager
+        from app.session.summarizer import SessionSummarizer
+
+        app.state.session_manager = SessionManager(settings)
+        summarizer = SessionSummarizer(app.state.llm_client)
+        app.state.context_window = ContextWindow(settings, summarizer)
+        app.state.token_budget = TokenBudget(settings)
+        app.state.tracer = Tracer()
+        logger.info("Sessions, budget, tracer ready")
+    except Exception as exc:
+        logger.error("Session/budget init failed (%s) — running stateless", exc)
+
+
 def _init_hitl(app: FastAPI) -> None:
     """Build the HITL queue, notifier, and approval gate (fault-tolerant)."""
     app.state.hitl_queue = None
@@ -167,6 +194,9 @@ def _init_agent(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.observability.logger import setup_logging
+
+    setup_logging(get_settings())
     await init_db()
     await init_redis()
     await _init_rag(app)
@@ -174,6 +204,7 @@ async def lifespan(app: FastAPI):
     _init_guards(app)
     _init_tools(app)
     _init_agent(app)
+    _init_sessions_and_budget(app)
     logger.info("OpsPilot started")
     yield
     await close_db()
@@ -185,6 +216,7 @@ def create_app() -> FastAPI:
 
     from fastapi.middleware.cors import CORSMiddleware
 
+    from app.api.admin_routes import router as admin_router
     from app.api.hitl_routes import router as hitl_router
     from app.api.middleware import APIMiddleware
 
@@ -199,6 +231,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(router)
     app.include_router(hitl_router)
+    app.include_router(admin_router)
 
     @app.get("/")
     async def root() -> dict:

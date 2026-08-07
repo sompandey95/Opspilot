@@ -22,10 +22,10 @@ _INSERT_SQL = """
 INSERT INTO traces (
     id, session_id, query, intent, model, steps, response, confidence,
     total_latency_ms, total_tokens, input_tokens, output_tokens,
-    hitl_triggered, escalated, prompt_version, guardrail_flags
+    hitl_triggered, escalated, prompt_version, guardrail_flags, cost_inr
 ) VALUES (
     $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16::jsonb
+    $16::jsonb, $17
 )
 """
 
@@ -44,6 +44,7 @@ class Trace:
     escalated: bool = False
     hitl_triggered: bool = False
     guardrail_flags: list[str] = field(default_factory=list)
+    cost_inr: float | None = None
     input_tokens: int = 0
     output_tokens: int = 0
     _started: float = field(default_factory=time.perf_counter, repr=False)
@@ -180,6 +181,7 @@ class Trace:
                 self.escalated,
                 self.prompt_version,
                 json.dumps(self.guardrail_flags) if self.guardrail_flags else None,
+                self.cost_inr,
             )
         except Exception as exc:
             logger.error("Failed to persist trace %s: %s", self.trace_id, exc)
