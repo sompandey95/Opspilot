@@ -49,6 +49,7 @@ class SmartChunker:
             "policies": self._chunk_policy,
             "tickets": self._chunk_ticket,
             "api_docs": self._chunk_api_doc,
+            "changelogs": self._chunk_changelog,
         }
         fn = dispatch.get(parent)
         if fn:
@@ -257,6 +258,48 @@ class SmartChunker:
                         "endpoint": f"{method} {path}" if method else "",
                         "method": method,
                         "path": path,
+                    },
+                )
+            )
+            idx += 1
+
+        return chunks
+
+    def _chunk_changelog(self, content: str, source: str) -> list[Chunk]:
+        """One chunk per dated entry (## YYYY-MM-DD — Title); date kept prominent."""
+        title = self._extract_h1(content)
+        stem = Path(source).stem
+
+        # Split on level-2 headings that start with an ISO date
+        parts = re.split(r"^(##\s+\d{4}-\d{2}-\d{2}\s+—\s+.+)", content, flags=re.MULTILINE)
+        # parts: [preamble, heading1, body1, heading2, body2, ...]
+
+        chunks: list[Chunk] = []
+        idx = 1
+        for i in range(1, len(parts), 2):
+            heading = parts[i].strip()
+            body = parts[i + 1].strip() if i + 1 < len(parts) else ""
+            # Strip horizontal rules that separate entries
+            body = re.sub(r"\n\s*---\s*(\n|$)", "\n", body).strip()
+
+            h_match = re.match(r"##\s+(\d{4}-\d{2}-\d{2})\s+—\s+(.+)", heading)
+            date = h_match.group(1) if h_match else ""
+            entry_title = h_match.group(2).strip() if h_match else heading
+
+            cat_match = re.search(r"\*\*Category:\*\*\s*(.+)", body)
+            category = cat_match.group(1).strip() if cat_match else "general"
+
+            chunks.append(
+                Chunk(
+                    id=f"changelog_{stem}_{idx:03d}",
+                    content=f"{heading}\n\n{body}",
+                    metadata={
+                        "doc_type": "changelog",
+                        "source_file": source,
+                        "category": category,
+                        "date": date,
+                        "entry_title": entry_title,
+                        "title": title,
                     },
                 )
             )

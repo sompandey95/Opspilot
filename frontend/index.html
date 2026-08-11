@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpsPilot Console — interactive system explorer</title>
+<style>
+  :root {
+    --bg: #f7fafa; --surface: #ffffff; --ink: #1d2b29; --muted: #5b6f6c;
+    --border: #d9e4e1; --accent: #0f766e; --accent-soft: #e4f2ef;
+    --good: #15803d; --warn: #b45309; --bad: #b91c1c; --code-bg: #eef4f2;
+    --user-bubble: #0f766e; --user-ink: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1615; --surface: #15201e; --ink: #d9e6e2; --muted: #8ba39d;
+      --border: #263733; --accent: #45c7b8; --accent-soft: #17302c;
+      --good: #4ade80; --warn: #fbbf24; --bad: #f87171; --code-bg: #1a2825;
+      --user-bubble: #0d5b54; --user-ink: #e8fffb;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Avenir Next", Avenir, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px; line-height: 1.55;
+  }
+  .mono { font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace; }
+  code {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.85em; background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px;
+  }
+  button { font-family: inherit; }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem;
+    padding: 0.9rem 1.5rem; border-bottom: 1px solid var(--border);
+    background: var(--surface); position: sticky; top: 0; z-index: 30;
+  }
+  header h1 { font-size: 1.05rem; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+  header h1 span { color: var(--accent); }
+  .health { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .dot {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    font-size: 0.72rem; font-weight: 600; padding: 0.2rem 0.6rem;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--bg);
+  }
+  .dot::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok::before { background: var(--good); }
+  .dot.down::before { background: var(--bad); }
+
+  .session-badge {
+    display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.72rem;
+    font-weight: 600; padding: 0.2rem 0.55rem 0.2rem 0.7rem; border-radius: 999px;
+    border: 1px dashed var(--accent); color: var(--accent); background: var(--accent-soft);
+  }
+  .session-badge button {
+    border: none; background: transparent; color: inherit; cursor: pointer;
+    font-weight: 700; font-size: 0.85em; padding: 0 0.15rem; text-decoration: underline;
+  }
+  .iconbtn {
+    margin-left: auto; border: 1px solid var(--border); background: var(--bg); color: var(--ink);
+    border-radius: 999px; width: 30px; height: 30px; cursor: pointer; font-size: 0.9rem;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .iconbtn:hover { border-color: var(--accent); }
+
+  .cfg {
+    display: none; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem;
+    padding: 0.85rem 1.5rem; border-bottom: 1px solid var(--border); background: var(--code-bg);
+    font-size: 0.8rem;
+  }
+  .cfg.open { display: grid; }
+  .cfg label { display: flex; flex-direction: column; gap: 0.25rem; font-weight: 600; color: var(--muted); }
+  .cfg input {
+    padding: 0.45rem 0.6rem; font: inherit; font-size: 0.82rem; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  }
+  .cfg .cfg-actions { grid-column: 1 / -1; display: flex; gap: 0.5rem; align-items: center; }
+  .cfg .hint { color: var(--muted); font-weight: 400; }
+
+  .intro {
+    padding: 0.75rem 1.5rem; font-size: 0.85rem; color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  .intro b { color: var(--ink); }
+
+  .layout {
+    display: grid; grid-template-columns: minmax(340px, 1.15fr) minmax(300px, 0.85fr);
+    gap: 1.25rem; padding: 1.25rem 1.5rem; max-width: 1200px; margin: 0 auto;
+  }
+  @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .panel-head {
+    padding: 0.7rem 1rem; border-bottom: 1px solid var(--border);
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  }
+  .panel-head .side { margin-left: auto; font-weight: 500; text-transform: none; letter-spacing: 0; }
+  .refresh {
+    border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+    border-radius: 999px; padding: 0.15rem 0.55rem; font-size: 0.68rem; font-weight: 700;
+    cursor: pointer; letter-spacing: normal; text-transform: none;
+  }
+  .refresh:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---------------- chat ---------------- */
+  .scenarios { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.75rem 1rem 0.25rem; }
+  .scenario {
+    font-size: 0.75rem; font-weight: 600; padding: 0.3rem 0.65rem; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--ink);
+  }
+  .scenario:hover, .scenario:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+  .scenario.memory { border-color: var(--accent); color: var(--accent); border-style: dashed; }
+
+  .thread { flex: 1; min-height: 320px; max-height: 460px; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  .msg { max-width: 88%; padding: 0.6rem 0.9rem; border-radius: 10px; font-size: 0.92rem; white-space: pre-wrap; overflow-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: var(--user-bubble); color: var(--user-ink); border-bottom-right-radius: 3px; }
+  .msg.bot  { align-self: flex-start; background: var(--code-bg); border: 1px solid var(--border); border-bottom-left-radius: 3px; }
+  .msg.bot.escalated { border-left: 3px solid var(--warn); }
+  .msg .meta { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.55rem; font-size: 0.7rem; font-weight: 600; }
+  .pill { border: 1px solid var(--border); border-radius: 999px; padding: 0.1rem 0.5rem; background: var(--surface); }
+  .pill.acc { color: var(--accent); border-color: var(--accent); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .pill.link { cursor: pointer; text-decoration: underline; }
+  .msg.pending { color: var(--muted); font-style: italic; }
+  .msg.system { align-self: center; color: var(--muted); font-size: 0.72rem; font-style: italic; background: none; padding: 0.1rem; }
+
+  .composer { display: flex; gap: 0.5rem; padding: 0.75rem 1rem; border-top: 1px solid var(--border); }
+  .composer input {
+    flex: 1; padding: 0.6rem 0.8rem; font: inherit; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .composer input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button.send {
+    padding: 0.6rem 1.2rem; font: inherit; font-weight: 700; cursor: pointer;
+    background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  }
+  button.send:disabled { opacity: 0.5; cursor: default; }
+  button.send:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  button.ghost {
+    padding: 0.4rem 0.7rem; font: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer;
+    background: transparent; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px;
+  }
+  button.ghost:hover { background: var(--accent-soft); }
+  button.ghost.bad { color: var(--bad); border-color: var(--bad); }
+  button.ghost.bad:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+  button.ghost:disabled { opacity: 0.5; cursor: default; }
+
+  /* ---------------- pipeline ---------------- */
+  .stages { display: flex; flex-direction: column; padding: 0.75rem; gap: 0; max-height: 620px; overflow-y: auto; }
+  .stage {
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+    padding: 0.55rem 0.8rem; cursor: pointer; transition: border-color 0.15s;
+  }
+  .stage:hover { border-color: var(--accent); }
+  .stage:focus-visible { outline: 2px solid var(--accent); }
+  .stage .row { display: flex; align-items: baseline; gap: 0.5rem; }
+  .stage .num {
+    font-size: 0.68rem; font-weight: 700; color: var(--muted);
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .stage .name { font-weight: 700; font-size: 0.87rem; }
+  .stage .file { margin-left: auto; font-size: 0.66rem; color: var(--muted); font-family: ui-monospace, Menlo, monospace; text-align: right; }
+  .stage .live { font-size: 0.76rem; color: var(--muted); margin-top: 0.2rem; min-height: 1em; }
+  .stage .live b { color: var(--accent); }
+  .stage.running { border-color: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
+  .stage.done { border-color: var(--accent); }
+  .stage.selected { background: var(--accent-soft); border-color: var(--accent); }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); } }
+  @media (prefers-reduced-motion: reduce) { .stage.running { animation: none; } }
+  .connector { width: 2px; height: 10px; background: var(--border); margin: 0 auto; }
+
+  /* ---------------- explainer ---------------- */
+  .explainer { padding: 1rem; font-size: 0.9rem; display: none; border-top: 1px solid var(--border); }
+  .explainer.open { display: block; }
+  .explainer h3 { margin: 0 0 0.3rem; font-size: 0.95rem; }
+  .explainer h4 {
+    margin: 0.9rem 0 0.3rem; font-size: 0.7rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .explainer p { margin: 0.4rem 0; }
+  .explainer ul { margin: 0.3rem 0; padding-left: 1.2rem; }
+  .explainer li { margin: 0.25rem 0; }
+  .lastreq { background: var(--code-bg); border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.82rem; }
+
+  /* ---------------- timeline + rag + hitl + admin ---------------- */
+  .wide { max-width: 1200px; margin: 0 auto 2rem; padding: 0 1.5rem; }
+  .timeline { display: flex; flex-direction: column; gap: 0.5rem; padding: 1rem; }
+  .tstep { display: grid; grid-template-columns: 26px 1fr; gap: 0.6rem; }
+  .ticon { font-size: 0.95rem; text-align: center; padding-top: 0.35rem; }
+  .tbody { border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.8rem; background: var(--bg); font-size: 0.85rem; overflow-x: auto; }
+  .tbody .thead { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; font-weight: 700; font-size: 0.8rem; }
+  .tbody .thead .soft { color: var(--muted); font-weight: 500; }
+  .tbody pre {
+    margin: 0.4rem 0 0.1rem; padding: 0.5rem 0.7rem; background: var(--code-bg);
+    border-radius: 6px; overflow-x: auto; font-size: 0.78rem; line-height: 1.45;
+    white-space: pre-wrap; overflow-wrap: break-word;
+  }
+  .ok { color: var(--good); } .bad { color: var(--bad); } .wr { color: var(--warn); }
+  .empty { padding: 1.2rem; color: var(--muted); font-size: 0.85rem; }
+
+  .ragbar { display: flex; gap: 0.5rem; padding: 0.9rem 1rem; }
+  .ragbar input { flex: 1; padding: 0.55rem 0.8rem; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+  .ragbar input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .chunk { border-top: 1px solid var(--border); padding: 0.7rem 1rem; font-size: 0.85rem; }
+  .chunk .chead { display: flex; flex-wrap: wrap; gap: 0.7rem; font-family: ui-monospace, Menlo, monospace; font-size: 0.76rem; margin-bottom: 0.3rem; }
+  .chunk .score { color: var(--accent); font-weight: 700; }
+  .chunk .body { color: var(--muted); white-space: pre-wrap; }
+
+  .queue { display: flex; flex-direction: column; }
+  .qitem { border-top: 1px solid var(--border); padding: 0.75rem 1rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  .qitem:first-child { border-top: none; }
+  .qhead { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.82rem; }
+  .qhead .tool { font-weight: 700; }
+  .qhead .risk { font-size: 0.68rem; font-weight: 700; padding: 0.08rem 0.5rem; border-radius: 999px; border: 1px solid; text-transform: uppercase; letter-spacing: 0.05em; }
+  .qhead .risk.high { color: var(--bad); border-color: var(--bad); }
+  .qhead .risk.medium { color: var(--warn); border-color: var(--warn); }
+  .qhead .risk.low, .qhead .risk.none { color: var(--good); border-color: var(--good); }
+  .qargs { font-size: 0.78rem; color: var(--muted); background: var(--code-bg); border-radius: 6px; padding: 0.4rem 0.6rem; overflow-x: auto; }
+  .qreason { font-size: 0.78rem; color: var(--muted); }
+  .qactions { display: flex; gap: 0.5rem; }
+
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; padding: 1rem; }
+  .stat { border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem 0.8rem; background: var(--bg); }
+  .stat .k { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .stat .v { font-size: 1.15rem; font-weight: 700; margin-top: 0.15rem; }
+  .atable { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .atable th, .atable td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid var(--border); }
+  .atable th { color: var(--muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .atable tr:last-child td { border-bottom: none; }
+  .gatewrap { padding: 0 1rem 1rem; }
+  .gaterow { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
+  .badge { font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.55rem; border-radius: 999px; border: 1px solid; }
+  .badge.pass { color: var(--good); border-color: var(--good); }
+  .badge.fail { color: var(--bad); border-color: var(--bad); }
+  .badge.na { color: var(--muted); border-color: var(--border); }
+  .adminsec { border-top: 1px solid var(--border); }
+  .adminsec:first-child { border-top: none; }
+  .adminsec .subhead { padding: 0.7rem 1rem 0.2rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+
+  footer { text-align: center; color: var(--muted); font-size: 0.75rem; padding: 1rem 0 2.5rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Ops<span>Pilot</span> Console</h1>
+  <span style="font-size:0.78rem;color:var(--muted)">interactive end-to-end tester &amp; system explainer</span>
+  <span class="session-badge" id="session-badge" title="Conversation memory lives here — same session ID across turns">
+    session <span class="mono" id="session-short"></span>
+    <button id="new-session" title="Start a fresh session (clears remembered context)">new</button>
+  </span>
+  <div class="health" id="health">
+    <span class="dot" id="h-api">api</span>
+    <span class="dot" id="h-pg">postgres</span>
+    <span class="dot" id="h-redis">redis</span>
+    <span class="dot" id="h-chroma">chroma <span id="h-docs" class="mono"></span></span>
+  </div>
+  <button class="iconbtn" id="cfg-toggle" title="API connection settings" aria-expanded="false">&#9881;</button>
+</header>
+
+<div class="cfg" id="cfg-panel">
+  <label>API base URL
+    <input id="cfg-base" placeholder="http://localhost:8000/api/v1">
+  </label>
+  <label>x-api-key <span class="hint">(only if OPSPILOT_API_KEY is set)</span>
+    <input id="cfg-key" placeholder="leave blank for local dev">
+  </label>
+  <label>x-org-id <span class="hint">(token budget bucket)</span>
+    <input id="cfg-org" placeholder="default">
+  </label>
+  <div class="cfg-actions">
+    <button class="ghost" id="cfg-save">Save &amp; reconnect</button>
+    <span class="hint">Point this at a deployed backend to test it the same way — nothing here is hardcoded to localhost anymore.</span>
+  </div>
+</div>
+
+<div class="intro">
+  Every message you send travels the real pipeline on the right — all <b>10 stages now live</b> (Phases 1–8), not just retrieval.
+  <b>Click any stage</b> to learn how it works. The <b>HITL queue</b> and <b>admin snapshot</b> panels below are wired to the same
+  endpoints a human reviewer / on-call engineer would use.
+</div>
+
+<div class="layout">
+  <!-- ============ CHAT ============ -->
+  <section class="panel">
+    <div class="panel-head">Chat with the agent <span class="side" id="turn-count"></span></div>
+    <div class="scenarios" id="scenarios"></div>
+    <div class="thread" id="thread">
+      <div class="empty">Send a message or pick a scenario. Suggested first run: the <b>stale-knowledge trap</b> — watch the agent prefer the dated changelog over the outdated policy. The <b>dashed</b> scenario runs two turns back-to-back on this session to prove memory works.</div>
+    </div>
+    <div class="composer">
+      <input id="input" placeholder="e.g. Where is my order ORD-2024-55001?" maxlength="4000"
+             aria-label="Message to the agent">
+      <button class="send" id="send">Send</button>
+    </div>
+  </section>
+
+  <!-- ============ PIPELINE ============ -->
+  <section class="panel">
+    <div class="panel-head">Request pipeline — click a layer to learn it</div>
+    <div class="stages" id="stages"></div>
+    <div class="explainer" id="explainer" aria-live="polite"></div>
+  </section>
+</div>
+
+<!-- ============ HITL QUEUE ============ -->
+<div class="wide">
+  <section class="panel">
+    <div class="panel-head">Human-in-the-loop queue — approve or reject live
+      <span class="side"><button class="refresh" id="hitl-refresh">refresh</button></span>
+    </div>
+    <div id="hitl-out"><div class="empty">HIGH-risk tool calls (refund over ₹500, cancel, escalate) stop here for a human before they execute. Trigger the <b>refund flow</b> scenario, then approve or reject it right from this panel — <code>POST /api/v1/hitl/approve/&#123;id&#125;</code> / <code>/reject/&#123;id&#125;</code>.</div></div>
+  </section>
+</div>
+
+<!-- ============ TRACE TIMELINE ============ -->
+<div class="wide">
+  <section class="panel">
+    <div class="panel-head">Trace timeline — the agent's actual steps
+      <span id="trace-id" class="mono side"></span>
+    </div>
+    <div id="timeline"><div class="empty">After a chat response, the full trace (every thought, tool call, observation, HITL decision, cost) is fetched from Postgres via the admin trace endpoint and replayed here. This same data is what the eval harness scores.</div></div>
+  </section>
+</div>
+
+<!-- ============ ADMIN SNAPSHOT ============ -->
+<div class="wide">
+  <section class="panel">
+    <div class="panel-head">Admin snapshot — cost, HITL, eval gate
+      <span class="side"><button class="refresh" id="admin-refresh">refresh</button> <span id="admin-updated" class="mono" style="margin-left:0.5rem;font-weight:500"></span></span>
+    </div>
+    <div id="admin-out"><div class="empty">Loading…</div></div>
+  </section>
+</div>
+
+<!-- ============ RAG EXPLORER ============ -->
+<div class="wide">
+  <section class="panel">
+    <div class="panel-head">RAG explorer — peek inside retrieval</div>
+    <div class="ragbar">
+      <input id="rag-q" placeholder="e.g. electronics return window" aria-label="Retrieval test query">
+      <button class="send" id="rag-go">Retrieve</button>
+    </div>
+    <div id="rag-out"><div class="empty">Runs the hybrid retriever directly (vector + BM25 → RRF → cross-encoder rerank) and shows the ranked chunks with scores — no LLM involved. Try <b>electronics return window</b>: the dated changelog should outrank the stale policy text.</div></div>
+  </section>
+</div>
+
+<footer>OpsPilot · Phases 1–8 complete (RAG · agent core · HITL &amp; guardrails · sessions/budget/observability · eval harness + CI gate) · API <span class="mono" id="api-base-label"></span> · this console is dev/ops tooling, not the customer-facing surface</footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const inr = (n) => "₹" + Number(n ?? 0).toFixed(2);
+const pct = (n) => (Number(n ?? 0) * 100).toFixed(1) + "%";
+
+/* ---------------- connection config (persisted, no hardcoded localhost-only setup) ---------------- */
+const CFG_KEYS = { base: "opspilot.apiBase", key: "opspilot.apiKey", org: "opspilot.orgId" };
+function loadCfg() {
+  return {
+    base: localStorage.getItem(CFG_KEYS.base) || "http://localhost:8000/api/v1",
+    key: localStorage.getItem(CFG_KEYS.key) || "",
+    org: localStorage.getItem(CFG_KEYS.org) || "default",
+  };
+}
+let CFG = loadCfg();
+$("cfg-base").value = CFG.base;
+$("cfg-key").value = CFG.key;
+$("cfg-org").value = CFG.org;
+$("api-base-label").textContent = CFG.base;
+
+$("cfg-toggle").onclick = () => {
+  const open = $("cfg-panel").classList.toggle("open");
+  $("cfg-toggle").setAttribute("aria-expanded", String(open));
+};
+$("cfg-save").onclick = () => {
+  localStorage.setItem(CFG_KEYS.base, $("cfg-base").value.trim() || CFG.base);
+  localStorage.setItem(CFG_KEYS.key, $("cfg-key").value.trim());
+  localStorage.setItem(CFG_KEYS.org, $("cfg-org").value.trim() || "default");
+  CFG = loadCfg();
+  $("api-base-label").textContent = CFG.base;
+  $("cfg-panel").classList.remove("open");
+  refreshEverything();
+};
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ "x-org-id": CFG.org }, opts.headers || {});
+  if (CFG.key) headers["x-api-key"] = CFG.key;
+  if (opts.body) headers["Content-Type"] = "application/json";
+  const res = await fetch(CFG.base + path, { ...opts, headers });
+  let data = null;
+  try { data = await res.json(); } catch { /* no body */ }
+  return { ok: res.ok, status: res.status, data };
+}
+
+/* ---------------- session / memory ---------------- */
+let sessionId = crypto.randomUUID();
+let turnCount = 0;
+function renderSession() {
+  $("session-short").textContent = sessionId.slice(0, 8);
+  $("turn-count").textContent = turnCount ? `${turnCount} turn${turnCount === 1 ? "" : "s"} remembered` : "no history yet";
+}
+$("new-session").onclick = () => {
+  sessionId = crypto.randomUUID();
+  turnCount = 0;
+  renderSession();
+  $("thread").innerHTML = `<div class="empty">New session — Redis history for the old one still lives for up to 2h (SESSION_TTL_SECONDS), but this chat no longer sees it.</div>`;
+  addMsg("system", "— started a new session, previous context forgotten —");
+};
+renderSession();
+
+/* ---------------- scenarios ---------------- */
+const SCENARIOS = [
+  ["Stale-knowledge trap", "How many days do I have to return my electronics purchase?"],
+  ["Order status", "Where is my order ORD-2024-55001? It was supposed to arrive already."],
+  ["Refund flow (HITL + idempotency)", "Order ORD-2024-55001 is delayed past its promised date. Please refund it, reason delivery delayed."],
+  ["Hindi-English", "Mera order ORD-2024-51234 deliver ho gaya but mujhe return karna hai, kaise karu?"],
+  ["Escalation", "This is ridiculous. I want to talk to a real human manager RIGHT NOW."],
+  ["Out of scope", "Can you write me a Python script to scrape Amazon prices?"],
+  ["Clarifying question", "My order has not arrived yet, where is it?"],
+  ["Ineligible refund", "Please refund order ORD-2024-54000, I changed my mind."],
+];
+for (const [label, q] of SCENARIOS) {
+  const b = document.createElement("button");
+  b.className = "scenario"; b.textContent = label; b.title = q;
+  b.onclick = () => { $("input").value = q; $("input").focus(); };
+  $("scenarios").appendChild(b);
+}
+// Two-turn memory proof: second message never repeats the order ID.
+const memBtn = document.createElement("button");
+memBtn.className = "scenario memory";
+memBtn.textContent = "Memory demo (2 turns)";
+memBtn.title = "Sends two messages on this session; the second relies on the agent remembering the order ID from the first.";
+memBtn.onclick = () => runMemoryDemo();
+$("scenarios").appendChild(memBtn);
+
+async function runMemoryDemo() {
+  memBtn.disabled = true;
+  await send("My order ORD-2024-55001 still hasn't shown up and it's overdue.");
+  addMsg("system", "— sending a follow-up with no order ID, relying on session memory —");
+  await send("OK please just refund it then, reason delivery delayed.");
+  memBtn.disabled = false;
+}
+
+/* ---------------- pipeline stages (mirrors the real /chat flow in api/routes.py) ---------------- */
+const STAGES = [
+  {
+    id: "api", num: "01", name: "API boundary + input guard", file: "api/middleware.py",
+    what: `<p><code>POST /api/v1/chat</code> — pure-ASGI middleware runs first: request-ID header, API-key auth (skipped when <code>OPSPILOT_API_KEY</code> is empty), Redis sliding-window rate limit, then the <b>input guard</b> on the body — 1–4000 chars, Indian PII masking (Aadhaar/PAN/card/UPI), prompt-injection signal blocklist.</p>`,
+    why: `<p>Implemented as raw ASGI (not <code>BaseHTTPMiddleware</code>) because masking PII means rewriting the request body before the route sees it — that needs control of <code>receive</code>. Auth and the guard <b>fail closed</b>; the rate limiter <b>fails open</b> (a dead Redis must never take the API down with it).</p>`,
+    live: (r, t) => r ? `received <b>${esc(r.query.length)}</b> chars · session <span class="mono">${esc(sessionId.slice(0,8))}</span>` : ""
+  },
+  {
+    id: "budget", num: "02", name: "Token budget check", file: "budget/token_budget.py",
+    what: `<p>Before any LLM call, a per-org Redis counter (<code>x-org-id</code> header, default <code>"default"</code>) is checked against daily/monthly token caps. Over budget ⇒ <code>429</code> before a single token is spent.</p>`,
+    why: `<p>Counters use natural Redis TTL expiry (no cron reset job) and <b>fail open</b> on Redis errors — a broken budget store degrades to "unlimited," never to a hard outage. Recorded <i>after</i> the agent runs, so a single request can overshoot by one turn — a cost brake, not a hard invariant.</p>`,
+    live: () => ""
+  },
+  {
+    id: "session", num: "03", name: "Session history + context window", file: "session/manager.py",
+    what: `<p>Prior turns for this <code>session_id</code> are pulled from Redis (<code>session:&#123;id&#125;</code>, TTL 2h, refreshed on every access). If the history is over <b>12,000 tokens</b> (tiktoken), everything except the last 3 exchanges is replaced by an LLM summary that's guaranteed to keep any <code>ORD-</code>/email/phone identifiers.</p>`,
+    why: `<p>This is the system's actual short-term memory — <b>not</b> a fresh conversation every message. Only user/assistant turns are stored (tool calls aren't); the compacted history is written back after each turn so summaries persist too. No <code>session_id</code> sent ⇒ fully stateless request.</p>`,
+    live: () => `history sent to agent: <b>${turnCount}</b> prior turn${turnCount === 1 ? "" : "s"}`
+  },
+  {
+    id: "classify", num: "04", name: "Intent classifier", file: "agent/intent_classifier.py",
+    what: `<p>GPT-5.4-mini in JSON-only mode reads the raw query and emits: <b>intent</b> (faq / action_simple / action_complex / escalate / out_of_scope), any <b>order ID</b>, customer identifier, <b>sentiment</b>, and <b>language</b> (en / hi / mixed).</p>`,
+    why: `<p>It <b>never raises</b>: an LLM failure or unparseable output falls back to <code>action_complex</code> — the most capable path — with regex order-ID extraction (<code>ORD-\\d&#123;4&#125;-\\d&#123;4,6&#125;</code>). A flaky classifier can only degrade <i>cost</i>, never <i>correctness</i>.</p>`,
+    live: (r) => r ? `intent <b>${esc(r.intent)}</b>` : ""
+  },
+  {
+    id: "route", num: "05", name: "Model router", file: "agent/model_router.py",
+    what: `<p>A static table maps intent → cheapest capable model: <b>faq / action_simple / out_of_scope → GPT-5.4-mini</b>; <b>action_complex → GPT-5.4</b>; <b>escalate → no LLM at all</b> (the canned handoff response needs zero agent tokens).</p>`,
+    why: `<p>Cost-aware routing lives <i>inside</i> the agent, not as separate infrastructure — the single biggest cost lever in the system (an escalation costs ~326 tokens total vs ~6,000 for a complex action).</p>`,
+    live: (r, t) => t ? `model <b>${esc(t.model || "none (escalate)")}</b>` : (r && r.intent === "escalate" ? "model <b>none — LLM skipped</b>" : "")
+  },
+  {
+    id: "react", num: "06", name: "ReAct agent loop", file: "agent/react_agent.py",
+    what: `<p>Up to 10 iterations of <b>think → act → observe</b>. Each turn the LLM either answers (loop ends) or requests a tool call. Every call is validated against the tool's JSON Schema <i>before</i> execution — malformed calls are fed back as error observations so the agent self-corrects. Exhausting all steps escalates to a human.</p>`,
+    why: `<p>Message history keeps proper <code>tool_call_id</code> pairing — required by the real API and what makes traces replayable. Per-step timeout stops a hung model from stalling the request.</p>`,
+    live: (r, t) => t ? `<b>${t.steps.filter(s => s.type === "llm").length}</b> LLM steps · <b>${t.steps.filter(s => s.type === "tool_result").length}</b> tool calls${t.steps.some(s => s.type === "validation_error") ? ' · <span class="wr">self-corrected a bad call</span>' : ""}` : ""
+  },
+  {
+    id: "tools", num: "07", name: "Tools · HITL gate · idempotency", file: "tools/ · hitl/gate.py",
+    what: `<p>11 tools, each declaring a <b>risk level</b>: knowledge search (none) · order lookups (low) · Jira tickets (medium) · <b>refund / cancel / escalate (HIGH)</b>. Every non-NONE-risk call is checked against the HITL matrix: NONE/LOW auto · MEDIUM auto+audit+Slack · <b>HIGH blocks for real human approval</b> via the Postgres <code>hitl_pending</code> queue — see the queue panel below.</p>`,
+    why: `<p><b>No double refunds:</b> state-changing calls are keyed by <code>sha256(sorted args)</code> in Redis (TTL 24h) — an identical retry returns the cached result without re-executing. The gate fails <i>closed</i> (queue down ⇒ rejected); refunds ≤ ₹500 with an explicit amount downgrade to MEDIUM, everything else HIGH.</p>`,
+    live: (r, t) => {
+      if (!t) return "";
+      const tools = t.steps.filter(s => s.type === "tool_result").map(s => s.tool + (s.from_cache ? " (cached)" : ""));
+      const hitl = t.steps.find(s => s.type === "hitl");
+      return (tools.length ? `<b>${tools.map(esc).join("</b>, <b>")}</b>` : "no tools used")
+        + (hitl ? ` · HITL: <span class="wr">${esc(hitl.status)}</span>` : "");
+    }
+  },
+  {
+    id: "confidence", num: "08", name: "Confidence gate", file: "agent/confidence.py",
+    what: `<p>A <b>deterministic</b> 0–1 score — deliberately not another LLM call. Base 0.5, plus sigmoid-normalised retrieval quality, plus tool success ratio, minus penalties for validation failures, near-max steps, suspiciously short answers. <b>Below 0.7 the agent hands off to a human instead of guessing.</b></p>`,
+    why: `<p>Scope-declines and clarifying questions are exempt — a correct refusal isn't a shaky answer. Weights are calibrated against the golden eval dataset.</p>`,
+    live: (r) => r && r.confidence != null
+      ? `score <b>${r.confidence.toFixed(2)}</b> ${r.confidence >= 0.7 ? '<span class="ok">≥ 0.7 — answered</span>' : '<span class="wr">&lt; 0.7 — escalated</span>'}`
+      : (r && r.escalated ? '<span class="wr">skipped — direct escalation</span>' : "")
+  },
+  {
+    id: "outputguard", num: "09", name: "Output guard", file: "guardrails/output_guard.py",
+    what: `<p>Scrubs any PII that slipped into the response, extracts verifiable claims (₹ amounts, ISO dates, day/week windows, percentages) and flags any not grounded in the query + tool results, and checks tone on angry turns.</p>`,
+    why: `<p>Flags-only — it never rewrites the answer (except PII), so a flagged response still ships but the flag lands in <code>traces.guardrail_flags</code> for review. This is what the hallucination judge in the eval harness checks against.</p>`,
+    live: () => ""
+  },
+  {
+    id: "trace", num: "10", name: "Trace, cost, budget record, session save", file: "observability/tracer.py",
+    what: `<p>Every request writes a row to Postgres: query, intent, model, <b>every step as JSONB</b>, confidence, token counts, latency, <code>prompt_version</code>, and now <b>cost in ₹</b> (Azure list price × ₹88/USD, priced per step by the model that ran it). Then the org's token budget counter is incremented and the compacted history + this turn is written back to Redis.</p>`,
+    why: `<p>The trace is the system's memory of itself — what the admin dashboard aggregates and what the eval judges score. Persistence is best-effort; a dead database never breaks a customer reply.</p>`,
+    live: (r, t) => r && r.trace_id ? `trace <span class="mono">${esc(r.trace_id.slice(0,8))}</span> · <b>${t ? t.total_tokens : "…"}</b> tokens · <b>${t && t.cost_inr != null ? inr(t.cost_inr) : "…"}</b> · <b>${t ? t.total_latency_ms + " ms" : "…"}</b>` : ""
+  },
+];
+
+let lastResponse = null, lastTrace = null, selectedStage = null;
+
+const stagesEl = $("stages");
+STAGES.forEach((st, i) => {
+  if (i > 0) { const c = document.createElement("div"); c.className = "connector"; stagesEl.appendChild(c); }
+  const d = document.createElement("div");
+  d.className = "stage"; d.id = "st-" + st.id; d.tabIndex = 0; d.setAttribute("role", "button");
+  d.innerHTML = `<div class="row"><span class="num">${st.num}</span><span class="name">${st.name}</span><span class="file">${st.file}</span></div><div class="live" id="live-${st.id}"></div>`;
+  d.onclick = () => selectStage(st.id);
+  d.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectStage(st.id); } };
+  stagesEl.appendChild(d);
+});
+
+function selectStage(id) {
+  selectedStage = selectedStage === id ? null : id;
+  document.querySelectorAll(".stage").forEach(el => el.classList.toggle("selected", el.id === "st-" + selectedStage));
+  const ex = $("explainer");
+  if (!selectedStage) { ex.classList.remove("open"); ex.innerHTML = ""; return; }
+  const st = STAGES.find(s => s.id === selectedStage);
+  const liveNow = st.live(lastResponse, lastTrace);
+  ex.innerHTML = `
+    <h3>${st.num} · ${st.name} <code style="font-size:0.7em">${st.file}</code></h3>
+    <h4>What it does</h4>${st.what}
+    <h4>Why it's built this way</h4>${st.why}
+    ${liveNow ? `<h4>In your last request</h4><div class="lastreq">${liveNow}</div>` : ""}`;
+  ex.classList.add("open");
+}
+
+function setStageStates(state) {
+  STAGES.forEach(st => {
+    const el = $("st-" + st.id);
+    el.classList.remove("running", "done");
+    if (state === "running") el.classList.add("running");
+    if (state === "done") el.classList.add("done");
+  });
+}
+
+function annotateStages() {
+  STAGES.forEach(st => { $("live-" + st.id).innerHTML = st.live(lastResponse, lastTrace); });
+  if (selectedStage) { const id = selectedStage; selectedStage = null; selectStage(id); }
+}
+
+/* ---------------- chat ---------------- */
+function addMsg(cls, html) {
+  const empty = $("thread").querySelector(".empty");
+  if (empty) empty.remove();
+  const d = document.createElement("div");
+  d.className = "msg " + cls; d.innerHTML = html;
+  $("thread").appendChild(d);
+  $("thread").scrollTop = $("thread").scrollHeight;
+  return d;
+}
+
+async function send(forcedQuery) {
+  const q = (forcedQuery ?? $("input").value).trim();
+  if (!q) return;
+  if (!forcedQuery) $("input").value = "";
+  $("send").disabled = true;
+  addMsg("user", esc(q));
+  const pending = addMsg("bot pending", "thinking — budget → session → classify → route → agent loop → guard…");
+  setStageStates("running");
+  lastResponse = null; lastTrace = null; annotateStages();
+
+  try {
+    const { ok, status, data } = await api("/chat", {
+      method: "POST",
+      body: JSON.stringify({ query: q, session_id: sessionId }),
+    });
+    if (!ok) throw new Error((data && data.detail) || `HTTP ${status}`);
+
+    lastResponse = { ...data, query: q };
+    pending.remove();
+    const conf = data.confidence != null ? data.confidence.toFixed(2) : "—";
+    addMsg("bot" + (data.escalated ? " escalated" : ""),
+      esc(data.response) +
+      `<div class="meta">
+         <span class="pill acc">${esc(data.intent)}</span>
+         <span class="pill">conf ${conf}</span>
+         ${data.escalated ? '<span class="pill warn">escalated</span>' : ""}
+         ${data.pending_approval ? '<span class="pill warn">pending approval — check the HITL queue ↓</span>' : ""}
+         <span class="pill link" data-trace="${esc(data.trace_id)}">trace ${esc(data.trace_id.slice(0,8))} ↓</span>
+       </div>`);
+    $("thread").querySelectorAll("[data-trace]").forEach(el =>
+      el.onclick = () => document.querySelector(".wide").scrollIntoView({ behavior: "smooth" }));
+
+    turnCount += 1;
+    renderSession();
+    await loadTrace(data.trace_id);
+    setStageStates("done");
+    if (data.pending_approval) loadPending();
+  } catch (err) {
+    pending.remove();
+    addMsg("bot escalated", `<b>Request failed:</b> ${esc(err.message)}<div class="meta"><span class="pill warn">check the API base/key in settings and that the backend is up</span></div>`);
+    setStageStates("");
+  } finally {
+    $("send").disabled = false;
+    annotateStages();
+    $("input").focus();
+  }
+}
+$("send").onclick = () => send();
+$("input").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+
+/* ---------------- trace timeline (admin endpoint — full row incl. cost/flags) ---------------- */
+const TICONS = { llm: "🧠", tool_result: "🔧", validation_error: "⚠️", hitl: "🛡️", tool_error: "❌", escalation: "⤴️" };
+
+async function loadTrace(id) {
+  try {
+    const { ok, data } = await api("/admin/traces/" + id);
+    if (!ok) throw new Error("trace fetch failed");
+    lastTrace = data;
+  } catch { lastTrace = null; return; }
+
+  $("trace-id").textContent = id;
+  const t = lastTrace;
+  const parts = [];
+  parts.push(`<div class="tstep"><div class="ticon">▶️</div><div class="tbody"><div class="thead">
+    <span>query</span><span class="soft">${esc(t.query)}</span></div>
+    <div class="thead" style="margin-top:0.3rem"><span>intent ${esc(t.intent)}</span>
+    <span class="soft">prompt ${esc(t.prompt_version)}</span>
+    <span class="soft">${t.input_tokens} in / ${t.output_tokens} out tokens</span>
+    <span class="soft">${t.total_latency_ms} ms total</span>
+    ${t.cost_inr != null ? `<span class="soft">${inr(t.cost_inr)}</span>` : ""}
+    ${t.guardrail_flags && t.guardrail_flags.length ? `<span class="wr">flags: ${t.guardrail_flags.map(esc).join(", ")}</span>` : ""}
+    </div></div></div>`);
+
+  for (const s of t.steps) {
+    const icon = TICONS[s.type] || "·";
+    let head = "", body = "";
+    if (s.type === "llm") {
+      const calls = (s.tool_calls || []).map(tc => `${tc.name}(${esc(JSON.stringify(tc.arguments))})`).join(", ");
+      head = `<span>LLM step ${s.step}</span><span class="soft">${esc(s.model)}</span><span class="soft">${s.latency_ms} ms · ${s.input_tokens}+${s.output_tokens} tok</span>`;
+      if (s.thought) body += `<pre>${esc(s.thought)}</pre>`;
+      if (calls) body += `<pre>→ wants: ${esc(calls)}</pre>`;
+      if (!s.thought && !calls) body += `<pre class="soft">(no content — final empty turn)</pre>`;
+    } else if (s.type === "tool_result") {
+      head = `<span>${esc(s.tool)}</span>
+        <span class="${s.success ? "ok" : "bad"}">${s.success ? "success" : "failed"}</span>
+        ${s.from_cache ? '<span class="wr">idempotent cache hit — not re-executed</span>' : ""}
+        <span class="soft">${s.latency_ms} ms</span>`;
+      body = `<pre>args: ${esc(JSON.stringify(s.arguments))}</pre>`;
+      if (s.error) body += `<pre class="bad">${esc(s.error)}</pre>`;
+      else if (s.data_preview) body += `<pre>${esc(s.data_preview.slice(0, 500))}${s.data_preview.length > 500 ? " …" : ""}</pre>`;
+      if (s.retrieval_scores) body += `<pre>rerank scores: ${s.retrieval_scores.map(x => x.toFixed(2)).join(", ")}</pre>`;
+    } else if (s.type === "validation_error") {
+      head = `<span>${esc(s.tool)}</span><span class="wr">invalid arguments — fed back for self-correction</span>`;
+      body = `<pre class="wr">${esc(s.error)}</pre>`;
+    } else if (s.type === "hitl") {
+      head = `<span>HITL gate · ${esc(s.tool)}</span><span class="${s.status === "approved" ? "ok" : "wr"}">${esc(s.status)}</span>`;
+      body = `<pre>${esc(s.reason || "")} — high-risk tool intercepted before execution; see the queue panel above for pending ones.</pre>`;
+    } else if (s.type === "tool_error") {
+      head = `<span>${esc(s.tool)}</span><span class="bad">execution error</span>`;
+      body = `<pre class="bad">${esc(s.error)}</pre>`;
+    } else if (s.type === "escalation") {
+      head = `<span>escalation</span><span class="wr">${esc(s.reason)}</span>`;
+      body = s.detail != null ? `<pre>${esc(String(s.detail))}</pre>` : "";
+    }
+    parts.push(`<div class="tstep"><div class="ticon">${icon}</div><div class="tbody"><div class="thead">${head}</div>${body}</div></div>`);
+  }
+
+  parts.push(`<div class="tstep"><div class="ticon">🏁</div><div class="tbody"><div class="thead">
+    <span>final</span>
+    ${t.confidence != null ? `<span>confidence ${Number(t.confidence).toFixed(2)}</span>` : ""}
+    ${t.escalated ? '<span class="wr">escalated</span>' : '<span class="ok">answered</span>'}
+    ${t.hitl_triggered ? '<span class="wr">HITL triggered</span>' : ""}
+  </div><pre>${esc(t.response || "")}</pre></div></div>`);
+
+  $("timeline").innerHTML = `<div class="timeline">${parts.join("")}</div>`;
+}
+
+/* ---------------- HITL queue ---------------- */
+async function loadPending() {
+  try {
+    const { ok, data } = await api("/hitl/pending");
+    if (!ok) throw new Error();
+    renderPending(data.pending || []);
+  } catch {
+    $("hitl-out").innerHTML = `<div class="empty">Couldn't reach the HITL queue — check connection settings, or Postgres may be down (the gate fails closed in that case).</div>`;
+  }
+}
+
+function renderPending(items) {
+  if (!items.length) {
+    $("hitl-out").innerHTML = `<div class="empty">Nothing pending. Trigger the <b>refund flow</b> scenario above (or any refund with no amount / over ₹500) to see a real approval request land here.</div>`;
+    return;
+  }
+  $("hitl-out").innerHTML = `<div class="queue">${items.map(it => `
+    <div class="qitem" data-id="${esc(it.id)}">
+      <div class="qhead">
+        <span class="tool">${esc(it.tool_name)}</span>
+        <span class="risk ${esc((it.risk_level || "").toLowerCase())}">${esc(it.risk_level)}</span>
+        <span class="soft mono" style="color:var(--muted);font-size:0.72rem">${esc(it.id.slice(0,8))} · ${it.created_at ? new Date(it.created_at).toLocaleTimeString() : ""}</span>
+      </div>
+      ${it.agent_reasoning ? `<div class="qreason">"${esc(it.agent_reasoning)}"</div>` : ""}
+      <div class="qargs">${esc(JSON.stringify(it.tool_args))}</div>
+      <div class="qactions">
+        <button class="ghost approve">Approve</button>
+        <button class="ghost bad reject">Reject</button>
+      </div>
+    </div>`).join("")}</div>`;
+
+  $("hitl-out").querySelectorAll(".qitem").forEach(el => {
+    const id = el.dataset.id;
+    el.querySelector(".approve").onclick = () => decide(id, true, el);
+    el.querySelector(".reject").onclick = () => decide(id, false, el);
+  });
+}
+
+async function decide(id, approved, el) {
+  const buttons = el.querySelectorAll("button");
+  buttons.forEach(b => b.disabled = true);
+  let reason = null;
+  if (!approved) {
+    reason = prompt("Rejection reason (min 3 characters):", "not eligible per policy");
+    if (reason == null) { buttons.forEach(b => b.disabled = false); return; }
+  }
+  try {
+    const { ok, status, data } = await api(`/hitl/${approved ? "approve" : "reject"}/${id}`, {
+      method: "POST",
+      body: JSON.stringify(approved ? { decided_by: "console-operator" } : { decided_by: "console-operator", reason }),
+    });
+    if (!ok) throw new Error((data && data.detail) || `HTTP ${status}`);
+    el.style.opacity = "0.5";
+    el.innerHTML += `<div class="qreason">→ ${approved ? "approved" : "rejected"}. The agent's blocked tool call resumes/fails on its next poll.</div>`;
+  } catch (err) {
+    alert("Decision failed: " + err.message);
+    buttons.forEach(b => b.disabled = false);
+  }
+  setTimeout(loadPending, 1500);
+}
+$("hitl-refresh").onclick = loadPending;
+
+/* ---------------- admin snapshot ---------------- */
+const GATE = [
+  { key: "tool_accuracy", label: "Tool accuracy", min: 0.85 },
+  { key: "hallucination_rate", label: "Hallucination rate", max: 0.05 },
+  { key: "faithfulness_avg", label: "Faithfulness", min: 0.90 },
+  { key: "retrieval_recall", label: "Retrieval recall", min: 0.65 },
+];
+
+async function loadAdmin() {
+  const [sum, cost, hitl, evalLatest] = await Promise.all([
+    api("/admin/metrics/summary?last=24h"),
+    api("/admin/metrics/cost-breakdown?last=24h"),
+    api("/admin/hitl/stats?last=24h"),
+    api("/admin/evals/latest"),
+  ]);
+
+  const parts = [];
+
+  if (sum.ok) {
+    const s = sum.data.summary || {};
+    parts.push(`<div class="adminsec"><div class="subhead">Last 24h</div><div class="grid3">
+      <div class="stat"><div class="k">Traces</div><div class="v">${s.total_traces ?? 0}</div></div>
+      <div class="stat"><div class="k">Avg confidence</div><div class="v">${s.avg_confidence != null ? Number(s.avg_confidence).toFixed(2) : "—"}</div></div>
+      <div class="stat"><div class="k">P50 / P99 latency</div><div class="v">${Math.round(s.p50_latency_ms ?? 0)} / ${Math.round(s.p99_latency_ms ?? 0)} ms</div></div>
+      <div class="stat"><div class="k">Total cost</div><div class="v">${inr(s.total_cost_inr)}</div></div>
+      <div class="stat"><div class="k">Escalation rate</div><div class="v">${pct(s.escalation_rate)}</div></div>
+      <div class="stat"><div class="k">HITL rate</div><div class="v">${pct(s.hitl_rate)}</div></div>
+    </div></div>`);
+  } else {
+    parts.push(`<div class="adminsec"><div class="empty">Metrics summary unavailable (${sum.status || "no connection"}) — Postgres may be down, or an API key is required.</div></div>`);
+  }
+
+  if (cost.ok && cost.data.by_model && cost.data.by_model.length) {
+    parts.push(`<div class="adminsec"><div class="subhead">Cost by model (24h)</div><div style="overflow-x:auto"><table class="atable">
+      <tr><th>Model</th><th>Traces</th><th>Input tok</th><th>Output tok</th><th>Cost</th></tr>
+      ${cost.data.by_model.map(r => `<tr><td class="mono">${esc(r.model)}</td><td>${r.traces}</td><td>${r.input_tokens}</td><td>${r.output_tokens}</td><td>${inr(r.cost_inr)}</td></tr>`).join("")}
+    </table></div></div>`);
+  }
+
+  if (hitl.ok) {
+    const decisions = hitl.data.decisions || [];
+    parts.push(`<div class="adminsec"><div class="subhead">HITL decisions (24h) · ${hitl.data.pending_count ?? 0} pending now</div>
+      ${decisions.length ? `<div style="overflow-x:auto"><table class="atable">
+        <tr><th>Decision</th><th>Count</th><th>Avg decision time</th></tr>
+        ${decisions.map(d => `<tr><td>${esc(d.decision)}</td><td>${d.count}</td><td>${Math.round(d.avg_decision_time_ms ?? 0)} ms</td></tr>`).join("")}
+      </table></div>` : `<div class="empty">No HITL decisions in this window.</div>`}
+    </div>`);
+  }
+
+  if (evalLatest.ok && evalLatest.data) {
+    const e = evalLatest.data;
+    const badges = GATE.map(g => {
+      const v = e[g.key];
+      if (v == null) return `<span class="badge na">${g.label} n/a</span>`;
+      const passed = g.min != null ? v >= g.min : v <= g.max;
+      const shown = g.key === "hallucination_rate" ? pct(v) : (typeof v === "number" ? v.toFixed(3) : v);
+      return `<span class="badge ${passed ? "pass" : "fail"}">${g.label} ${shown}</span>`;
+    }).join(" ");
+    parts.push(`<div class="adminsec"><div class="subhead">Latest eval run · prompt <code>${esc(e.prompt_version)}</code> · ${e.total_scenarios} scenarios · ${e.created_at ? new Date(e.created_at).toLocaleString() : ""}</div>
+      <div class="gatewrap">
+        <div class="gaterow">
+          <span class="badge ${e.ci_gate_passed ? "pass" : "fail"}">CI gate ${e.ci_gate_passed ? "PASS" : "FAIL"}</span>
+          ${badges}
+        </div>
+        <div class="gaterow" style="color:var(--muted);font-size:0.78rem">
+          avg latency ${Math.round(e.avg_latency_ms ?? 0)} ms · avg cost ${inr(e.avg_cost_inr)} · relevance ${e.relevance_avg != null ? Number(e.relevance_avg).toFixed(2) : "—"}
+        </div>
+      </div>
+    </div>`);
+  } else {
+    parts.push(`<div class="adminsec"><div class="empty">No eval runs recorded yet — run <code>python scripts/run_evals.py</code> or <code>POST /api/v1/admin/evals/run</code> (needs Azure OpenAI credentials).</div></div>`);
+  }
+
+  $("admin-out").innerHTML = parts.join("");
+  $("admin-updated").textContent = "updated " + new Date().toLocaleTimeString();
+}
+$("admin-refresh").onclick = loadAdmin;
+
+function refreshEverything() {
+  health();
+  loadPending();
+  loadAdmin();
+}
+
+/* ---------------- rag explorer ---------------- */
+async function ragGo() {
+  const q = $("rag-q").value.trim();
+  if (!q) return;
+  $("rag-out").innerHTML = `<div class="empty">retrieving…</div>`;
+  try {
+    const { ok, data } = await api("/rag/test?query=" + encodeURIComponent(q));
+    if (!ok || !data.results || !data.results.length) {
+      $("rag-out").innerHTML = `<div class="empty">${esc((data && data.error) || "No results — has the knowledge base been ingested?")}</div>`;
+      return;
+    }
+    $("rag-out").innerHTML = data.results.map((r, i) => `
+      <div class="chunk">
+        <div class="chead">
+          <span>#${i + 1}</span>
+          <span class="score">${r.score.toFixed(3)}</span>
+          <span>${esc(r.chunk_id)}</span>
+          <span style="color:var(--muted)">${esc(r.metadata && r.metadata.doc_type || "")}</span>
+        </div>
+        <div class="body">${esc(r.content.slice(0, 350))}${r.content.length > 350 ? " …" : ""}</div>
+      </div>`).join("");
+  } catch (err) {
+    $("rag-out").innerHTML = `<div class="empty">Retrieval failed: ${esc(err.message)}</div>`;
+  }
+}
+$("rag-go").onclick = ragGo;
+$("rag-q").addEventListener("keydown", e => { if (e.key === "Enter") ragGo(); });
+
+/* ---------------- health ---------------- */
+async function health() {
+  try {
+    const { ok, data: h } = await api("/health");
+    if (!ok) throw new Error();
+    $("h-api").className = "dot ok";
+    $("h-pg").className = "dot " + (h.postgres ? "ok" : "down");
+    $("h-redis").className = "dot " + (h.redis ? "ok" : "down");
+    $("h-chroma").className = "dot " + (h.chromadb ? "ok" : "down");
+    $("h-docs").textContent = h.chromadb_docs ? `(${h.chromadb_docs})` : "";
+  } catch {
+    ["h-api", "h-pg", "h-redis", "h-chroma"].forEach(id => $(id).className = "dot down");
+  }
+}
+
+refreshEverything();
+setInterval(health, 15000);
+setInterval(loadPending, 12000);
+setInterval(loadAdmin, 45000);
+</script>
+</body>
+</html>

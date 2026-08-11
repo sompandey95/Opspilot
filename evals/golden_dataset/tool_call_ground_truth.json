@@ -1,0 +1,169 @@
+{
+  "description": "scenario_id -> expected business tool calls (derived from scenarios.json; search_knowledge excluded by design)",
+  "ground_truth": {
+    "single_action_001": [
+      {
+        "tool": "check_order_status",
+        "args": {
+          "order_id": "ORD-2024-55001"
+        }
+      }
+    ],
+    "single_action_002": [
+      {
+        "tool": "get_delivery_eta",
+        "args": {
+          "order_id": "ORD-2024-54000"
+        }
+      }
+    ],
+    "single_action_003": [
+      {
+        "tool": "check_refund_eligibility",
+        "args": {
+          "order_id": "ORD-2024-51234"
+        }
+      }
+    ],
+    "single_action_004": [
+      {
+        "tool": "check_order_status",
+        "args": {
+          "order_id": "ORD-2024-53000"
+        }
+      }
+    ],
+    "single_action_005": [
+      {
+        "tool": "get_delivery_eta",
+        "args": {
+          "order_id": "ORD-2024-78432"
+        }
+      }
+    ],
+    "multi_step_001": [
+      {
+        "tool": "check_order_status",
+        "args": {
+          "order_id": "ORD-2024-55001"
+        }
+      },
+      {
+        "tool": "check_refund_eligibility",
+        "args": {
+          "order_id": "ORD-2024-55001"
+        }
+      },
+      {
+        "tool": "process_refund",
+        "args": {
+          "order_id": "ORD-2024-55001",
+          "reason": "delivery_delayed"
+        }
+      }
+    ],
+    "multi_step_002": [
+      {
+        "tool": "check_order_status",
+        "args": {
+          "order_id": "ORD-2024-78432"
+        }
+      },
+      {
+        "tool": "check_refund_eligibility",
+        "args": {
+          "order_id": "ORD-2024-78432"
+        }
+      },
+      {
+        "tool": "process_refund",
+        "args": {
+          "order_id": "ORD-2024-78432",
+          "reason": "delivery_delayed"
+        }
+      }
+    ],
+    "multi_step_003": [
+      {
+        "tool": "check_refund_eligibility",
+        "args": {
+          "order_id": "ORD-2024-51234"
+        }
+      },
+      {
+        "tool": "process_refund",
+        "args": {
+          "order_id": "ORD-2024-51234",
+          "reason": "change_of_mind"
+        }
+      }
+    ],
+    "multi_step_004": [
+      {
+        "tool": "check_refund_eligibility",
+        "args": {
+          "order_id": "ORD-2024-52000"
+        }
+      }
+    ],
+    "adversarial_003": [
+      {
+        "tool": "check_refund_eligibility",
+        "args": {
+          "order_id": "ORD-2024-54000"
+        }
+      }
+    ],
+    "edge_case_001": [
+      {
+        "tool": "check_order_status",
+        "args": {
+          "order_id": "ORD-2024-99999"
+        }
+      }
+    ],
+    "edge_case_002": [
+      {
+        "tool": "get_delivery_eta",
+        "args": {
+          "order_id": "ORD-2024-55001"
+        }
+      },
+      {
+        "tool": "get_delivery_eta",
+        "args": {
+          "order_id": "ORD-2024-54000"
+        }
+      }
+    ],
+    "edge_case_003": [
+      {
+        "tool": "check_order_status",
+        "args": {
+          "order_id": "ORD-2024-53000"
+        }
+      }
+    ],
+    "angry_001": [
+      {
+        "tool": "check_order_status",
+        "args": {
+          "order_id": "ORD-2024-78432"
+        }
+      },
+      {
+        "tool": "check_refund_eligibility",
+        "args": {
+          "order_id": "ORD-2024-78432"
+        }
+      },
+      {
+        "tool": "process_refund",
+        "args": {
+          "order_id": "ORD-2024-78432",
+          "reason": "delivery_delayed"
+        }
+      }
+    ]
+  }
+}

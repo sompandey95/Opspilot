@@ -22,6 +22,8 @@ dependencies = [
     "sentence-transformers",
     "alembic",
     "httpx",
+    "jsonschema",
+    "numpy",
 ]
 
 [project.optional-dependencies]

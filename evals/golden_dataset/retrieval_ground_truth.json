@@ -1,0 +1,61 @@
+{
+  "description": "scenario_id -> expected chunk IDs (derived from scenarios.json; check_golden_dataset.py enforces consistency)",
+  "ground_truth": {
+    "faq_en_001": [
+      "faq_returns_and_refunds_001",
+      "policy_refund_policy_003"
+    ],
+    "faq_en_002": [
+      "faq_returns_and_refunds_003",
+      "policy_refund_policy_007"
+    ],
+    "faq_en_003": [
+      "faq_returns_and_refunds_007",
+      "policy_refund_policy_008"
+    ],
+    "faq_en_004": [
+      "faq_delivery_and_shipping_001",
+      "policy_delivery_sla_policy_002"
+    ],
+    "faq_en_005": [
+      "faq_delivery_and_shipping_002"
+    ],
+    "faq_en_006": [
+      "faq_delivery_and_shipping_005"
+    ],
+    "faq_mixed_001": [
+      "faq_returns_and_refunds_001",
+      "policy_refund_policy_003"
+    ],
+    "faq_mixed_002": [
+      "faq_payments_and_billing_003",
+      "policy_cod_policy_002",
+      "changelog_changelog_2026_q2_001"
+    ],
+    "faq_mixed_003": [
+      "faq_returns_and_refunds_003",
+      "policy_refund_policy_007"
+    ],
+    "single_action_003": [
+      "policy_refund_policy_004"
+    ],
+    "multi_step_003": [
+      "policy_refund_policy_004"
+    ],
+    "multi_step_004": [
+      "policy_refund_policy_002"
+    ],
+    "stale_knowledge_001": [
+      "changelog_changelog_2026_q3_001",
+      "policy_refund_policy_003",
+      "faq_returns_and_refunds_001"
+    ],
+    "stale_knowledge_002": [
+      "changelog_changelog_2026_q3_001",
+      "faq_returns_and_refunds_001"
+    ],
+    "edge_case_003": [
+      "policy_refund_policy_007"
+    ]
+  }
+}

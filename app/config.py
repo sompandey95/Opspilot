@@ -32,15 +32,30 @@ class Settings(BaseSettings):
     RERANK_TOP_K: int = 5
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
+    DEDUP_SIMILARITY_THRESHOLD: float = 0.95
 
     MAX_AGENT_STEPS: int = 10
     AGENT_TIMEOUT_SECONDS: int = 45
     CONFIDENCE_THRESHOLD: float = 0.7
 
+    SESSION_TTL_SECONDS: int = 7200
+    CONTEXT_MAX_TOKENS: int = 12000
+    CONTEXT_KEEP_LAST_EXCHANGES: int = 3
+
+    BUDGET_DAILY_TOKENS: int = 500_000     # per org; 0 = unlimited
+    BUDGET_MONTHLY_TOKENS: int = 10_000_000  # per org; 0 = unlimited
+
+    LOG_LEVEL: str = "INFO"
+    LOG_JSON: bool = False
+
     HITL_HIGH_RISK_ACTIONS: list[str] = Field(default_factory=list)
     HITL_REFUND_AUTO_APPROVE_LIMIT: float = 500.0
     HITL_APPROVAL_TIMEOUT_MINUTES: int = 30
+    HITL_POLL_INTERVAL_SECONDS: float = 2.0
     RATE_LIMIT_PER_MINUTE: int = 60
+    OPSPILOT_API_KEY: str = ""  # empty = auth disabled (local dev)
+    INPUT_MAX_QUERY_LENGTH: int = 4000
+    CORS_ALLOW_ORIGINS: list[str] = Field(default_factory=lambda: ["*"])
 
     JIRA_BASE_URL: str = ""
     JIRA_EMAIL: str = ""
@@ -51,8 +66,12 @@ class Settings(BaseSettings):
 
     EVAL_FAITHFULNESS_THRESHOLD: float = 0.90
     EVAL_HALLUCINATION_MAX: float = 0.05
-    EVAL_HALLUCINATION_MAX_RATE: float = 0.05
+    # Precision@K is reported but NOT gated: with K=5 and most golden scenarios
+    # having 1-3 relevant chunks, P@5 is capped at relevant_count/5 regardless
+    # of retrieval quality (measured ceiling ~0.35-0.40, nowhere near 0.85).
+    # Recall@K and MRR aren't capped that way, so they gate instead.
     EVAL_RETRIEVAL_PRECISION_THRESHOLD: float = 0.85
+    EVAL_RETRIEVAL_RECALL_THRESHOLD: float = 0.65
 
     ENABLE_CHAIN_OF_VERIFICATION: bool = True
 

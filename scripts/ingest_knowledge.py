@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.config import get_settings
 from app.rag.chunker import Chunk, SmartChunker
+from app.rag.dedup import SemanticDeduplicator
 from app.rag.embedder import AzureEmbedder
 from app.rag.vector_store import ChromaStore
 
@@ -105,7 +106,20 @@ async def ingest(reset: bool = False) -> None:
 
     if valid_pairs:
         valid_chunks, valid_embeddings = zip(*valid_pairs)
-        await store.add_chunks(list(valid_chunks), list(valid_embeddings))
+
+        # ------------------------------------------------------------------ #
+        # 5. Semantic dedup                                                    #
+        # ------------------------------------------------------------------ #
+        deduper = SemanticDeduplicator(threshold=settings.DEDUP_SIMILARITY_THRESHOLD)
+        kept_chunks, kept_embeddings, dropped = deduper.deduplicate(
+            list(valid_chunks), list(valid_embeddings)
+        )
+        for dup_id, kept_id in dropped:
+            logger.info("  Dedup: dropping %s (near-duplicate of %s)", dup_id, kept_id)
+        if dropped:
+            logger.info("  Dedup removed %d near-duplicate chunks", len(dropped))
+
+        await store.add_chunks(kept_chunks, kept_embeddings)
 
     final_count = store.get_collection_count()
     logger.info(
