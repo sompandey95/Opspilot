@@ -73,7 +73,13 @@ class ConfidenceScorer:
         # Retrieval quality
         if retrieval_scores:
             score += _RETRIEVAL_MAX_BONUS * _sigmoid(max(retrieval_scores))
-        elif trace.intent == "faq":
+        elif trace.intent == "faq" and tool_results == 0:
+            # A "faq" answer grounded in neither the knowledge base nor any
+            # tool call is suspicious. But the intent classifier sometimes
+            # tags an order-status question "faq" even though check_order_status
+            # (not search_knowledge) is the right tool for it — that answer is
+            # grounded via the tool result, just not via retrieval. Only
+            # penalise when there's no grounding of either kind.
             score -= _FAQ_NO_RETRIEVAL_PENALTY
 
         # Tool reliability

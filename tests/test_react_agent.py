@@ -163,7 +163,7 @@ async def test_tool_call_then_answer(registry, settings):
     assert types.count("llm") == 2
     assert "tool_result" in types
     assert result.trace.total_tokens == 100 + 50 + (100 + 20) + 80  # + classifier usage
-    assert result.trace.prompt_version == "v2"
+    assert result.trace.prompt_version == "v3"
 
 
 async def test_final_response_recorded_on_trace(registry, settings):

@@ -12,7 +12,6 @@ Safety properties baked in:
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging

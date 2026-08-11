@@ -1,3 +1,4 @@
+import hashlib
 import logging
 
 from pydantic import BaseModel, Field
@@ -6,16 +7,35 @@ import httpx
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-import json
-import uuid
-
 from app.config import get_settings
-from app.db.postgres import fetch_one, get_pool
+from app.db.postgres import get_pool
 from app.db.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1")
+
+# Same order of magnitude as the HITL approval timeout — long enough to
+# absorb an impatient customer resending the identical message while the
+# first request is still in flight, short enough that asking again later
+# still raises a fresh escalation.
+_ESCALATION_DEDUP_TTL_SECONDS = 10 * 60
+
+# Maps app.observability.trace.Trace.add_escalation() reason strings (set by
+# react_agent.py) to the escalate_to_manager tool's fixed reason enum.
+_ESCALATION_REASON_MAP = {
+    "intent_escalate": "customer_requested_human",
+    "low_confidence": "low_confidence",
+    "max_steps_reached": "repeated_failure",
+    "llm_error": "repeated_failure",
+}
+
+
+def _get_redis_or_none():
+    try:
+        return get_redis()
+    except RuntimeError:
+        return None
 
 
 @router.get("/health", tags=["ops"])
@@ -121,17 +141,59 @@ async def chat(body: ChatRequest, request: Request) -> dict:
         if response_text != result.response:
             result.trace.set_response(response_text)
 
-    # Direct intent-escalations still notify a human (best-effort).
-    if result.escalated and intent.intent.value == "escalate":
-        registry = getattr(request.app.state, "tool_registry", None)
-        escalate_tool = registry.get("escalate_to_manager") if registry else None
-        if escalate_tool is not None:
-            try:
-                await escalate_tool.execute(
-                    reason="customer_requested_human", summary=body.query
+    # Any escalation — explicit request, low confidence, max steps, or an LLM
+    # error — must actually reach a human, not just tell the customer it will.
+    # Skip only if the agent already executed escalate_to_manager itself this
+    # turn (that already queued it and notified Slack; don't double-post).
+    if result.escalated:
+        already_queued = any(
+            step.get("type") in ("tool_result", "tool_error")
+            and step.get("tool") == "escalate_to_manager"
+            for step in result.trace.steps
+        )
+        if not already_queued:
+            registry = getattr(request.app.state, "tool_registry", None)
+            escalate_tool = registry.get("escalate_to_manager") if registry else None
+            if escalate_tool is not None:
+                last_escalation = next(
+                    (s for s in reversed(result.trace.steps) if s.get("type") == "escalation"),
+                    None,
                 )
-            except Exception as exc:
-                logger.error("Escalation notification failed: %s", exc)
+                escalation_reason = (last_escalation or {}).get("reason")
+                reason = _ESCALATION_REASON_MAP.get(escalation_reason, "low_confidence")
+
+                # Called directly here (not through the agent's tool-call path),
+                # so it bypasses react_agent's own idempotency wrapper — without
+                # a dedup key, a customer resending the same message (or a slow
+                # request being retried) would queue and Slack-notify a human
+                # once per resend instead of once per underlying issue.
+                dedup_key = "idempotent:escalate_to_manager:" + hashlib.sha256(
+                    f"{body.session_id or ''}|{reason}|{body.query}".encode()
+                ).hexdigest()
+                redis = _get_redis_or_none()
+                already_notified = False
+                if redis is not None:
+                    try:
+                        already_notified = bool(await redis.get(dedup_key))
+                    except Exception as exc:
+                        logger.error("Escalation dedup check failed (%s) — notifying anyway", exc)
+
+                if not already_notified:
+                    try:
+                        await escalate_tool.execute(
+                            reason=reason,
+                            summary=f"Auto-escalated ({escalation_reason or 'unspecified'}): {body.query}"[:500],
+                            customer_identifier=(
+                                intent.extracted_order_id or intent.extracted_customer_id
+                            ),
+                        )
+                        if redis is not None:
+                            try:
+                                await redis.setex(dedup_key, _ESCALATION_DEDUP_TTL_SECONDS, "1")
+                            except Exception as exc:
+                                logger.error("Escalation dedup write failed: %s", exc)
+                    except Exception as exc:
+                        logger.error("Escalation notification failed: %s", exc)
 
     tracer = getattr(request.app.state, "tracer", None)
     if tracer is not None:
@@ -157,38 +219,6 @@ async def chat(body: ChatRequest, request: Request) -> dict:
         "escalated": result.escalated,
         "pending_approval": result.pending_approval,
     }
-
-
-@router.get("/traces/{trace_id}", tags=["dev"])
-async def get_trace(trace_id: str) -> dict:
-    """Dev/debug endpoint — full trace by ID for the interactive console.
-    Superseded by the Phase 6 admin routes."""
-    try:
-        tid = uuid.UUID(trace_id)
-    except ValueError:
-        return JSONResponse(status_code=400, content={"detail": "Invalid trace ID"})
-
-    try:
-        row = await fetch_one(
-            """
-            SELECT id, session_id, query, intent, model, steps, response,
-                   confidence, total_latency_ms, total_tokens, input_tokens,
-                   output_tokens, hitl_triggered, escalated, prompt_version,
-                   created_at
-            FROM traces WHERE id = $1
-            """,
-            tid,
-        )
-    except Exception as exc:
-        logger.error("Trace lookup failed: %s", exc)
-        return JSONResponse(status_code=503, content={"detail": "Trace store unavailable"})
-
-    if row is None:
-        return JSONResponse(status_code=404, content={"detail": "Trace not found"})
-
-    trace = dict(row)
-    trace["steps"] = json.loads(trace["steps"])
-    return trace
 
 
 @router.get("/rag/test", tags=["dev"])

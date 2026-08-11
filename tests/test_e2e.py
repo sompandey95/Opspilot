@@ -116,13 +116,19 @@ async def order_client():
         yield c
 
 
-def build_e2e_app(agent_llm, order_client, session_redis, budget_redis, daily_limit=0):
+def build_e2e_app(
+    agent_llm, order_client, session_redis, budget_redis, daily_limit=0, confidence=0.9
+):
     settings = Settings(_env_file=None, BUDGET_DAILY_TOKENS=daily_limit, BUDGET_MONTHLY_TOKENS=0)
 
     app = create_app()
-    registry = build_default_registry(settings, retriever=None, order_client=order_client)
     queue = HITLQueue(settings)
     gate = HITLApprovalGate(queue, SlackNotifier(settings), settings)
+    # hitl_queue wired into the registry too, same as _init_tools in app.main —
+    # escalate_to_manager needs it to actually create a hitl_pending row.
+    registry = build_default_registry(
+        settings, retriever=None, order_client=order_client, hitl_queue=queue
+    )
 
     app.state.retriever = None
     app.state.tool_registry = registry
@@ -136,7 +142,7 @@ def build_e2e_app(agent_llm, order_client, session_redis, budget_redis, daily_li
         schema_validator=SchemaValidator(registry),
         settings=settings,
         hitl_gate=gate,
-        confidence_scorer=FixedConfidence(0.9),
+        confidence_scorer=FixedConfidence(confidence),
         redis_client=session_redis,
     )
     app.state.output_guard = OutputGuard()
@@ -193,7 +199,7 @@ async def test_full_lifecycle_chat_to_trace_row(order_client, captured_inserts):
     assert len(inserts) == 1
     args = inserts[0]
     assert "[PAN_MASKED]" in args[ARG_QUERY]
-    assert args[ARG_PROMPT_VERSION] == "v2"
+    assert args[ARG_PROMPT_VERSION] == "v3"
     assert "pii_pan" in json.loads(args[ARG_FLAGS])
     assert args[ARG_COST] and args[ARG_COST] > 0
 
@@ -203,10 +209,68 @@ async def test_full_lifecycle_chat_to_trace_row(order_client, captured_inserts):
     assert "[PAN_MASKED]" in history[0]["content"]
     assert history[1]["content"] == body["response"]
 
+
+async def test_low_confidence_escalation_actually_queues_for_a_human(order_client, captured_inserts):
+    """Regression test for a real bug: the agent said "connecting you with a
+    human agent" on low-confidence escalation, but nothing was ever queued or
+    notified — only the classifier's explicit intent=="escalate" path did
+    that. Any result.escalated must now reach the HITL queue."""
+    llm = ScriptedLLM([answer("I'm not sure how to help with that.")])
+    session_redis, budget_redis = FakeRedis(), FakeRedis()
+    app = build_e2e_app(llm, order_client, session_redis, budget_redis, confidence=0.2)
+
+    async with client_for(app) as client:
+        resp = await client.post(
+            "/api/v1/chat",
+            json={"query": "Where is my order ORD-2024-55001?", "session_id": str(uuid.uuid4())},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["escalated"] is True
+    assert body["confidence"] == 0.2
+
+    hitl_inserts = [args for sql, args in captured_inserts if "INSERT INTO hitl_pending" in sql]
+    assert len(hitl_inserts) == 1
+    tool_name, tool_args = hitl_inserts[0][2], json.loads(hitl_inserts[0][3])
+    assert tool_name == "escalate_to_manager"
+    assert tool_args["reason"] == "low_confidence"
+    assert "ORD-2024-55001" in tool_args["summary"]
+
     # Budget counters incremented for the default org
     assert any(k.startswith("budget:default:day:") for k in budget_redis.store)
     day_used = next(v for k, v in budget_redis.store.items() if ":day:" in k)
     assert day_used > 0
+
+
+async def test_duplicate_escalation_message_notifies_once(order_client, captured_inserts, monkeypatch):
+    """Regression test: escalate_to_manager is invoked directly from the route
+    handler on low-confidence escalation, not through the agent's tool-call
+    path — so it doesn't get react_agent's own idempotency wrapper for free.
+    Without an explicit dedup key, a customer resending the identical message
+    (impatient retry, slow response) would queue and Slack-notify a human once
+    per resend instead of once per underlying issue."""
+    dedup_redis = FakeRedis()
+    monkeypatch.setattr("app.db.redis._redis", dedup_redis)
+
+    llm = ScriptedLLM([
+        answer("I'm not sure how to help with that."),
+        answer("I'm not sure how to help with that."),
+    ])
+    session_redis, budget_redis = FakeRedis(), FakeRedis()
+    app = build_e2e_app(llm, order_client, session_redis, budget_redis, confidence=0.2)
+    session_id = str(uuid.uuid4())
+
+    async with client_for(app) as client:
+        for _ in range(2):
+            resp = await client.post(
+                "/api/v1/chat",
+                json={"query": "Where is my order ORD-2024-55001?", "session_id": session_id},
+            )
+            assert resp.status_code == 200
+
+    hitl_inserts = [args for sql, args in captured_inserts if "INSERT INTO hitl_pending" in sql]
+    assert len(hitl_inserts) == 1
 
 
 async def test_second_turn_sees_session_history(order_client, captured_inserts):

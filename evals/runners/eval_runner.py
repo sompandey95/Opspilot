@@ -171,7 +171,8 @@ class EvalRunner:
         }
 
         context = self._context_from_trace(trace)
-        hallucination = check_hallucination(answer, context)
+        tool_call_args = self._tool_call_args_from_trace(trace)
+        hallucination = check_hallucination(answer, context, tool_call_args)
         result["hallucinated"] = hallucination.hallucinated
         result["hallucination_detail"] = {
             "fabricated_ids": hallucination.fabricated_ids,
@@ -230,6 +231,18 @@ class EvalRunner:
             if step.get("type") == "tool_result" and step.get("data_preview"):
                 parts.append(step["data_preview"])
         return "\n".join(p for p in parts if p)
+
+    @staticmethod
+    def _tool_call_args_from_trace(trace) -> str:
+        """Every argument passed to a tool this turn, successful or not — a
+        fabricated ID fed into a failed lookup is still a fabrication even if
+        it never reached the visible answer."""
+        parts = [
+            json.dumps(step["arguments"], default=str)
+            for step in trace.steps
+            if step.get("type") in ("tool_result", "tool_error") and step.get("arguments")
+        ]
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------ #
     # Aggregation + gate + persistence                                     #

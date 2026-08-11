@@ -1,7 +1,5 @@
 """Judge tests: tool-accuracy matching rules, deterministic hallucination
 grounding, and the LLM judges' parsing/failure behaviour (fake LLM)."""
-import pytest
-
 from app.llm.client import LLMResponse, Usage
 
 from evals.judges.faithfulness import FaithfulnessJudge
@@ -120,6 +118,23 @@ def test_no_claims_is_clean():
     result = check_hallucination("Happy to help with anything else!", CONTEXT)
     assert not result.hallucinated
     assert result.total_claims == 0
+
+
+def test_fabricated_id_in_tool_call_args_is_hard_fail_even_if_answer_is_clean():
+    # The agent invented an order ID, fed it to a tool (which failed), then
+    # gave an honest answer that never repeats the fabricated ID — scanning
+    # the answer alone would miss this entirely.
+    answer = "I couldn't find that order. Please share the full order ID."
+    tool_call_args = '{"order_id": "ORD-2024-00321"}'
+    result = check_hallucination(answer, CONTEXT, tool_call_args)
+    assert result.hallucinated
+    assert result.fabricated_ids == ["ORD-2024-00321"]
+
+
+def test_tool_call_args_grounded_in_context_is_not_flagged():
+    tool_call_args = '{"order_id": "ORD-2024-55001"}'
+    result = check_hallucination("Checking that order for you.", CONTEXT, tool_call_args)
+    assert not result.hallucinated
 
 
 # --------------------------------------------------------------------- #

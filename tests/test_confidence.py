@@ -50,6 +50,17 @@ def test_faq_without_retrieval_is_penalised():
     assert scorer().score("q", ANSWER, trace) < 0.5
 
 
+def test_faq_tagged_order_lookup_grounded_by_tool_not_penalised():
+    # Regression: the intent classifier sometimes tags an order-status
+    # question "faq" even though check_order_status (not search_knowledge) is
+    # the right tool. That answer is grounded via the tool result, not
+    # retrieval — it must not eat the FAQ-no-retrieval penalty on top of the
+    # tool-success bonus, or a fully correct, fully grounded answer scores
+    # 0.65 and gets discarded for a canned escalation message.
+    trace = trace_with([llm_step(), tool_ok(), llm_step()], intent="faq")
+    assert scorer().score("q", ANSWER, trace) >= 0.7
+
+
 def test_tool_failures_pull_below_threshold():
     trace = trace_with([llm_step(), tool_fail(), llm_step()])
     assert scorer().score("q", ANSWER, trace) < 0.7

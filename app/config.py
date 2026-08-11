@@ -66,7 +66,6 @@ class Settings(BaseSettings):
 
     EVAL_FAITHFULNESS_THRESHOLD: float = 0.90
     EVAL_HALLUCINATION_MAX: float = 0.05
-    EVAL_HALLUCINATION_MAX_RATE: float = 0.05
     # Precision@K is reported but NOT gated: with K=5 and most golden scenarios
     # having 1-3 relevant chunks, P@5 is capped at relevant_count/5 regardless
     # of retrieval quality (measured ceiling ~0.35-0.40, nowhere near 0.85).

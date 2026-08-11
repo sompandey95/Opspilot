@@ -49,7 +49,7 @@ async def main() -> int:
     from app.config import get_settings
     from app.db.postgres import init_db
     from evals.reports.eval_report import to_markdown
-    from evals.runners.eval_runner import EvalRunner, load_scenarios
+    from evals.runners.eval_runner import load_scenarios
 
     settings = get_settings()
     if not (settings.AZURE_OPENAI_API_KEY and settings.AZURE_OPENAI_ENDPOINT):

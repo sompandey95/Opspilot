@@ -1,8 +1,6 @@
 """Session layer tests: Redis history manager, context-window compaction
 (empty / exactly-at-limit / over-limit), and the summariser's hard guarantee
 that order numbers and customer IDs survive summarisation."""
-import json
-
 import pytest
 
 from app.config import Settings

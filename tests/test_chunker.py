@@ -1,9 +1,7 @@
 """Tests for SmartChunker using the actual ShopEasy knowledge_base files."""
 from pathlib import Path
 
-import pytest
-
-from app.rag.chunker import Chunk, SmartChunker
+from app.rag.chunker import SmartChunker
 
 KB = Path(__file__).parent.parent / "knowledge_base"
 chunker = SmartChunker()

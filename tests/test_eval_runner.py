@@ -255,3 +255,28 @@ async def test_hallucinating_answer_fails_gate(order_client, captured):
     assert "ORD-2024-70000" in scenario["hallucination_detail"]["fabricated_ids"]
     assert report["metrics"]["hallucination_rate"] == 1.0
     assert report["ci_gate"]["passed"] is False
+
+
+async def test_fabricated_tool_call_arg_fails_gate_even_with_honest_answer(order_client, captured):
+    """Reproduces a real production bug: the agent invents an order ID, calls
+    a tool with it (which fails, since the ID never existed), then recovers
+    with an honest answer that never repeats the fabricated ID. The
+    fabrication happened in the tool call, not the answer — eval_runner must
+    still catch it via the tool-call-args wiring, or this class of
+    hallucination would silently pass the CI gate."""
+    settings = Settings(_env_file=None)
+    runner = build_runner(order_client, settings)
+    runner._agent._llm = RouterLLM({
+        "Where is my order ORD-2024-55001": [
+            tool_call("check_order_status", {"order_id": "ORD-1999-00001"}),
+            answer("I couldn't find that order. Please share the full order ID."),
+        ],
+    })
+
+    report = await runner.run(picked_scenarios(), subset=1)
+
+    scenario = report["scenarios"][0]
+    assert scenario["hallucinated"] is True
+    assert "ORD-1999-00001" in scenario["hallucination_detail"]["fabricated_ids"]
+    assert report["metrics"]["hallucination_rate"] == 1.0
+    assert report["ci_gate"]["passed"] is False

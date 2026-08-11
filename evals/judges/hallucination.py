@@ -9,6 +9,12 @@ Severity rule from the spec: ANY fabricated order/refund ID ⇒ the scenario is
 a hallucination fail outright, regardless of everything else. Other ungrounded
 claims are reported and also fail the scenario (a support answer must not
 invent numbers), but they're distinguished in the result for debugging.
+
+`tool_call_args` (optional) also gets scanned for fabricated IDs: an agent
+that invents an order ID, feeds it to a tool, and gets a failure back — then
+recovers with an honest "I couldn't find that, please share the full ID" —
+never repeats the fabricated ID in `answer`, so scanning `answer` alone misses
+the fabrication entirely. The tool call itself is the hallucination.
 """
 from __future__ import annotations
 
@@ -46,9 +52,17 @@ def _digits(text: str) -> str:
     return re.sub(r"\D", "", text)
 
 
-def check_hallucination(answer: str, context: str) -> HallucinationResult:
+def check_hallucination(
+    answer: str, context: str, tool_call_args: str = ""
+) -> HallucinationResult:
     """`context` = everything the agent legitimately saw: the customer query,
-    retrieved chunk contents, and tool-result payloads, concatenated."""
+    retrieved chunk contents, and tool-result payloads, concatenated.
+
+    `tool_call_args` = every argument the agent passed to a tool this turn
+    (regardless of whether the call succeeded), concatenated. Checked against
+    the same `context` — an ID the agent supplied to a tool must already have
+    come from the customer or an earlier tool result, not be invented fresh.
+    """
     context_norm = _normalise(context)
     context_digits = _digits(context)
 
@@ -58,7 +72,7 @@ def check_hallucination(answer: str, context: str) -> HallucinationResult:
     seen: set[str] = set()
 
     for pattern in _ID_PATTERNS:
-        for match in pattern.findall(answer):
+        for match in pattern.findall(answer) + pattern.findall(tool_call_args):
             claim = match.upper()
             if claim in seen:
                 continue
