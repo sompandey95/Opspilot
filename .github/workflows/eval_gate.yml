@@ -1,0 +1,131 @@
+name: Eval Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/agent/prompts/**"
+      - "app/agent/react_agent.py"
+      - "app/agent/intent_classifier.py"
+      - "app/rag/retriever.py"
+      - "app/rag/chunker.py"
+      - "evals/golden_dataset/**"
+  schedule:
+    - cron: "0 3 * * *" # nightly — full current dataset
+  workflow_dispatch: {}
+
+concurrency:
+  group: eval-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval-gate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: opspilot
+          POSTGRES_USER: opspilot
+          POSTGRES_PASSWORD: opspilot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      chromadb:
+        image: chromadb/chroma:latest
+        ports: ["8100:8000"]
+    env:
+      DATABASE_URL: postgresql+asyncpg://opspilot:opspilot@localhost:5432/opspilot
+      REDIS_URL: redis://localhost:6379/0
+      CHROMA_HOST: localhost
+      CHROMA_PORT: "8100"
+      ORDER_SERVICE_URL: http://localhost:8001
+      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+      AZURE_OPENAI_API_VERSION: "2025-04-01-preview"
+      AZURE_DEPLOYMENT_GPT54: ${{ secrets.AZURE_DEPLOYMENT_GPT54 }}
+      AZURE_DEPLOYMENT_GPT54_MINI: ${{ secrets.AZURE_DEPLOYMENT_GPT54_MINI }}
+      AZURE_DEPLOYMENT_GPT4O: ${{ secrets.AZURE_DEPLOYMENT_GPT4O }}
+      AZURE_DEPLOYMENT_EMBEDDING: ${{ secrets.AZURE_DEPLOYMENT_EMBEDDING }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # Forked PRs don't get repo secrets — skip the live-LLM gate rather than
+      # hard-failing a contributor's PR on a trust boundary they can't cross.
+      - name: Check Azure credentials
+        id: creds
+        run: |
+          if [ -z "$AZURE_OPENAI_API_KEY" ] || [ -z "$AZURE_OPENAI_ENDPOINT" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Azure OpenAI secrets not available (likely a fork PR) — skipping eval gate"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check golden dataset consistency
+        if: steps.creds.outputs.available == 'true'
+        run: python scripts/check_golden_dataset.py
+
+      - name: Start mock order service
+        if: steps.creds.outputs.available == 'true'
+        run: |
+          nohup uvicorn mock_services.order_service.main:app --port 8001 > mock_order_service.log 2>&1 &
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:8001/orders/ORD-2024-55001 > /dev/null && break
+            sleep 1
+          done
+
+      - name: Run DB migrations
+        if: steps.creds.outputs.available == 'true'
+        run: alembic upgrade head
+
+      - name: Ingest knowledge base
+        if: steps.creds.outputs.available == 'true'
+        run: python scripts/ingest_knowledge.py --reset
+
+      - name: Run eval harness (PR — core scenario set)
+        if: steps.creds.outputs.available == 'true' && github.event_name == 'pull_request'
+        run: python scripts/run_evals.py --subset 30
+
+      - name: Run eval harness (scheduled/manual — full dataset)
+        if: steps.creds.outputs.available == 'true' && github.event_name != 'pull_request'
+        run: python scripts/run_evals.py
+
+      - name: Render report
+        if: steps.creds.outputs.available == 'true'
+        run: python scripts/generate_eval_report.py --latest > eval_report.md
+
+      - name: Comment on PR
+        if: steps.creds.outputs.available == 'true' && github.event_name == 'pull_request' && always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: eval_report.md
+
+      - name: Enforce eval gate
+        if: steps.creds.outputs.available == 'true'
+        run: python evals/ci/eval_gate.py --latest
+
+      - name: Upload report artifact
+        if: steps.creds.outputs.available == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: |
+            evals/reports/runs/*.json
+            eval_report.md
+          retention-days: 30

@@ -52,7 +52,7 @@ Health check: `GET /api/v1/health` · Retrieval debug: `GET /api/v1/rag/test?que
   LLM/network calls are mocked; order-service tools are tested against the real
   mock app via `httpx.ASGITransport`.
 
-## Current state (Phases 1–7 complete)
+## Current state (Phases 1–8 complete)
 
 ```
 app/
@@ -66,7 +66,9 @@ app/
   api/admin_routes.py       # GET /admin/traces[?last=24h|7d], /admin/traces/{id},
                             # /admin/metrics/summary, /admin/metrics/cost-breakdown,
                             # /admin/hitl/stats, /admin/hitl/pending,
-                            # /admin/evals/latest, /admin/evals/trend?versions=v1,v2
+                            # /admin/evals/latest, /admin/evals/trend?versions=v1,v2;
+                            # POST /admin/evals/run (202, fire-and-forget, 503 w/o
+                            # Azure creds — result lands via /evals/latest)
   api/hitl_routes.py        # POST /hitl/approve/{id}, /hitl/reject/{id} (409 on
                             # double-decide), GET /hitl/pending
   api/middleware.py         # pure-ASGI: X-Request-ID, API-key auth (off when
@@ -118,7 +120,8 @@ app/
   llm/client.py             # LLMClient: role → Azure deployment, normalized LLMResponse,
                             # per-call timeout, usage capture (all LLM access goes here)
   agent/
-    prompts/                # v1_system.txt + current.txt symlink; version → trace rows
+    prompts/                # v1_system.txt, v2_system.txt (current) + current.txt
+                            # symlink; version → trace rows
     prompt_loader.py        # load_current_prompt() → (text, version)
     intent_classifier.py    # GPT-5.4-mini JSON classifier; never raises — falls back
                             # to action_complex + regex order-ID extraction
@@ -185,18 +188,25 @@ evals/
     relevance.py            # GPT-4o judge 0–1 vs reference answer as rubric
   runners/
     retrieval_eval.py       # P@K / R@K / MRR macro-averages (no LLM cost)
+    runner_factory.py       # build_eval_runner(): assembles agent+tools+judges;
+                            # shared by scripts/run_evals.py and POST /admin/evals/run
     eval_runner.py          # guard → classify → agent → output guard per scenario;
                             # deterministic + LLM metrics; CI-gate verdict vs
-                            # Settings thresholds; JSON report + eval_runs row;
-                            # --subset/--category
+                            # Settings thresholds (retrieval gate = recall, not
+                            # precision — see Phase 8 notes); JSON report +
+                            # eval_runs row; --subset/--category
     regression_tracker.py   # direction-aware diff of two run reports (latency/
                             # cost judged relatively ±10%, scores ±0.01)
   reports/eval_report.py    # markdown table for PR comments (runs/ is gitignored)
+  ci/eval_gate.py           # reads a report JSON's ci_gate, exits 1 on breach
 knowledge_base/             # faqs/ policies/ tickets/ api_docs/ changelogs/
 scripts/ingest_knowledge.py # chunk → embed → dedup → upsert
 scripts/check_golden_dataset.py  # dataset ↔ seed ↔ chunker consistency gate
-scripts/run_evals.py        # run harness vs real agent (needs Azure + mock svc)
+scripts/run_evals.py        # run harness vs real agent (needs Azure + mock svc;
+                            # restart mock-order-service between comparative runs)
 scripts/generate_eval_report.py  # report JSON → markdown; --compare for diffs
+.github/workflows/eval_gate.yml  # PR: core 30 scenarios; nightly/dispatch: full
+                            # dataset; skips (not fails) without Azure secrets
 frontend/index.html         # self-contained dev console: chat tester, animated
                             # pipeline explainer, trace timeline, RAG explorer.
                             # Uses dev endpoints GET /api/v1/traces/{id} and
@@ -420,7 +430,65 @@ Original plan (for reference):
 7. Thresholds (already in Settings): faithfulness ≥ 0.90, hallucination ≤ 0.05,
    retrieval precision ≥ 0.85, tool accuracy ≥ 0.85.
 
-## Phase 8 — CI gate + polish (~3 days)  ← NEXT
+## Phase 8 — CI gate + polish — ✅ DONE (2026-08-10)
+
+Delivered as specced, with these deviations/decisions:
+- **Retrieval gate checks recall, not precision.** The first live eval run
+  (real Azure, real mock service) showed `retrieval_precision@5` is capped at
+  `relevant_chunks / 5` — most golden scenarios have 1–3 relevant chunks, so
+  precision@5 can't exceed 0.20–0.60 regardless of retrieval quality. The
+  baseline's 0.28 average was every scenario hitting its own ceiling (recall
+  was already 0.70, MRR 0.69). `EVAL_RETRIEVAL_PRECISION_THRESHOLD` (0.85)
+  stays for reporting; the actual gate is the new
+  `EVAL_RETRIEVAL_RECALL_THRESHOLD` (0.65). See `app/config.py` comment and
+  `evals/runners/eval_runner.py::_ci_gate`.
+- **Real v1 → v2 prompt iteration**, driven by the baseline's tool-accuracy
+  failures (0.763, gate requires 0.85): the agent called `get_delivery_eta`
+  right after `check_order_status` (which already returns ETA), used
+  `check_refund_eligibility` for "where's my refund" questions
+  `check_order_status` answers directly, and sometimes stopped after
+  confirming eligibility instead of completing a refund the customer asked
+  for. `v2_system.txt` adds four rules for exactly this; nothing else
+  changed. Result: tool accuracy 0.763 → 0.893, gate FAIL → PASS, retrieval
+  recall unchanged (0.70 both runs — the expected sanity check for a
+  prompt-only change). `current.txt` now points at `v2_system.txt`.
+- **Eval reproducibility gotcha, documented not silently fixed:** the mock
+  order service has mutable in-memory state (refunds/cancellations persist
+  until restart). Re-running the eval harness against the same live instance
+  means the second run sees post-refund order state, contaminating any diff.
+  `scripts/run_evals.py`'s docstring now calls this out; restart
+  `mock-order-service` between comparative runs.
+- `evals/runners/runner_factory.py` (new) extracts the agent/tools/judges
+  assembly that used to live inline in `scripts/run_evals.py`, so
+  `POST /admin/evals/run` builds the identical pipeline instead of
+  duplicating it.
+- `POST /admin/evals/run` is fire-and-forget (`asyncio.create_task`, no job
+  registry) — 202 immediately, 503 if Azure creds aren't configured; the
+  result lands as a new row via the existing `GET /admin/evals/latest`/
+  `/admin/evals/trend`. No separate job-status endpoint; the eval_runs row +
+  report file are the record, consistent with how `scripts/run_evals.py`
+  already worked.
+- `.github/workflows/eval_gate.yml`: core 30 on PRs, full dataset
+  nightly/`workflow_dispatch`; skips (doesn't fail) when Azure secrets are
+  absent, since forked PRs never get repo secrets and shouldn't hard-fail on
+  a trust boundary they can't cross. Posts a sticky PR comment, uploads the
+  report JSON as an artifact.
+- README rewritten with the measured v1→v2 numbers above and a real,
+  reproduced end-to-end transcript (stale-knowledge answer, a refund blocked
+  on HITL then approved, admin metrics) — no demo recording (out of scope for
+  an agent to produce).
+- Known gaps carried forward rather than papered over: 4/15
+  retrieval-checked scenarios genuinely miss the right chunk (ticket text
+  near-duplicates a policy section — needs retriever/reranker tuning, not a
+  prompt fix); `adversarial_003` escalates to a human instead of running the
+  eligibility check the ground truth expects (safe — adversarial containment
+  is still 100% — but doesn't match tool-call ground truth); two scenarios
+  share a pinned order and interact within a single eval run.
+- Tests: `test_eval_gate.py` (new), `test_admin_routes.py` extended for
+  `POST /evals/run`, `test_eval_runner.py`/`test_react_agent.py`/
+  `test_e2e.py` updated for the recall-based gate and `v2` prompt version.
+
+Original plan (for reference):
 
 1. `evals/ci/eval_gate.py` — read report JSON, exit 1 if any threshold breached.
 2. `.github/workflows/eval_gate.yml` — on PRs touching

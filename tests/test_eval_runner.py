@@ -205,7 +205,7 @@ async def test_runner_end_to_end(order_client, captured, tmp_path):
 
     # CI gate: retrieval skipped (no retriever), everything else passes
     assert report["ci_gate"]["passed"] is True
-    assert "retrieval_precision" in report["ci_gate"]["skipped"]
+    assert "retrieval_recall" in report["ci_gate"]["skipped"]
 
     # Report file written and eval_runs row inserted
     report_path = tmp_path / report["report_path"].split("/")[-1]

@@ -13,6 +13,14 @@ optional (the run degrades to file-only reporting).
     python scripts/run_evals.py --no-retrieval        # skip Chroma-dependent metrics
 
 Always run scripts/check_golden_dataset.py first (CI does).
+
+CAUTION: the mock order service holds mutable in-memory state (refunds,
+cancellations) that only resets on restart — running this twice in a row
+against the same live instance means the second run sees post-refund/
+post-cancel order state, not the pinned fixtures. Restart it
+(`docker compose restart mock-order-service`) before each run when comparing
+two prompt versions, or the diff will include stale-state noise alongside
+real regressions.
 """
 from __future__ import annotations
 
@@ -26,64 +34,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 SCENARIOS_PATH = REPO_ROOT / "evals" / "golden_dataset" / "scenarios.json"
 REPORT_DIR = REPO_ROOT / "evals" / "reports" / "runs"
-
-
-async def build_runner(settings, with_llm_judges: bool, with_retrieval: bool):
-    """Assemble the production pipeline for eval runs."""
-    from app.agent.intent_classifier import IntentClassifier
-    from app.agent.react_agent import ReActAgent
-    from app.guardrails.input_guard import InputGuard
-    from app.guardrails.output_guard import OutputGuard
-    from app.guardrails.schemas import SchemaValidator
-    from app.llm.client import LLMClient
-    from app.tools.registry import build_default_registry
-    from evals.judges.faithfulness import FaithfulnessJudge
-    from evals.judges.relevance import RelevanceJudge
-    from evals.runners.eval_runner import EvalRunner
-
-    llm = LLMClient(settings)
-
-    retriever = None
-    if with_retrieval:
-        try:
-            from app.rag.bm25_index import BM25Index
-            from app.rag.embedder import AzureEmbedder
-            from app.rag.reranker import Reranker
-            from app.rag.retriever import HybridRetriever
-            from app.rag.vector_store import ChromaStore
-
-            vector_store = ChromaStore(settings)
-            vector_store.get_or_create_collection()
-            retriever = HybridRetriever(
-                vector_store=vector_store,
-                embedder=AzureEmbedder(settings),
-                bm25_index=BM25Index(),
-                reranker=Reranker(),
-                settings=settings,
-            )
-            await retriever.initialize()
-        except Exception as exc:
-            print(f"⚠ retrieval unavailable ({exc}) — retrieval metrics skipped")
-            retriever = None
-
-    registry = build_default_registry(settings, retriever=retriever)
-    agent = ReActAgent(
-        llm=llm,
-        tool_registry=registry,
-        schema_validator=SchemaValidator(registry),
-        settings=settings,
-    )
-
-    return EvalRunner(
-        agent=agent,
-        classifier=IntentClassifier(llm),
-        input_guard=InputGuard(settings),
-        output_guard=OutputGuard(),
-        faithfulness_judge=FaithfulnessJudge(llm) if with_llm_judges else None,
-        relevance_judge=RelevanceJudge(llm) if with_llm_judges else None,
-        retriever=retriever,
-        settings=settings,
-    )
 
 
 async def main() -> int:
@@ -111,7 +61,9 @@ async def main() -> int:
     except Exception as exc:
         print(f"⚠ Postgres unavailable ({exc}) — eval_runs row will be skipped")
 
-    runner = await build_runner(
+    from evals.runners.runner_factory import build_eval_runner
+
+    runner = await build_eval_runner(
         settings,
         with_llm_judges=not args.no_llm_judges,
         with_retrieval=not args.no_retrieval,

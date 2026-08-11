@@ -193,7 +193,7 @@ async def test_full_lifecycle_chat_to_trace_row(order_client, captured_inserts):
     assert len(inserts) == 1
     args = inserts[0]
     assert "[PAN_MASKED]" in args[ARG_QUERY]
-    assert args[ARG_PROMPT_VERSION] == "v1"
+    assert args[ARG_PROMPT_VERSION] == "v2"
     assert "pii_pan" in json.loads(args[ARG_FLAGS])
     assert args[ARG_COST] and args[ARG_COST] > 0
 

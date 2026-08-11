@@ -6,19 +6,28 @@ route. `last` windows accept "24h" / "7d" style values (default 24h).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
+from pathlib import Path
+
+from pydantic import BaseModel
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
+from app.config import get_settings
 from app.db.postgres import fetch_one
 from app.observability import metrics
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SCENARIOS_PATH = _REPO_ROOT / "evals" / "golden_dataset" / "scenarios.json"
+_REPORT_DIR = _REPO_ROOT / "evals" / "reports" / "runs"
 
 _MAX_WINDOW_HOURS = 24 * 90
 
@@ -157,3 +166,46 @@ async def evals_trend(versions: str = Query(..., description="e.g. v1,v2")):
     except Exception as exc:
         return _unavailable("eval trend", exc)
     return {"versions": wanted, "runs": rows}
+
+
+class EvalRunRequest(BaseModel):
+    subset: int | None = None
+    category: str | None = None
+    no_llm_judges: bool = False
+    no_retrieval: bool = False
+
+
+async def _run_eval_job(payload: EvalRunRequest) -> None:
+    """Fired in the background by POST /evals/run. Hits real Azure OpenAI —
+    result lands as a new row visible via GET /evals/latest and a report file
+    under evals/reports/runs; there is no separate job-status store."""
+    from evals.runners.eval_runner import load_scenarios
+    from evals.runners.runner_factory import build_eval_runner
+
+    settings = get_settings()
+    try:
+        runner = await build_eval_runner(
+            settings,
+            with_llm_judges=not payload.no_llm_judges,
+            with_retrieval=not payload.no_retrieval,
+        )
+        scenarios = load_scenarios(_SCENARIOS_PATH)
+        await runner.run(
+            scenarios, subset=payload.subset, category=payload.category, report_dir=_REPORT_DIR
+        )
+    except Exception:
+        logger.exception("Background eval run failed")
+
+
+@router.post("/evals/run", status_code=202)
+async def evals_run(payload: EvalRunRequest = EvalRunRequest()):
+    settings = get_settings()
+    if not (settings.AZURE_OPENAI_API_KEY and settings.AZURE_OPENAI_ENDPOINT):
+        return JSONResponse(
+            status_code=503, content={"detail": "Azure OpenAI credentials not configured"}
+        )
+    asyncio.create_task(_run_eval_job(payload))
+    return {
+        "status": "started",
+        "detail": "Running against the live agent — poll GET /api/v1/admin/evals/latest for results.",
+    }

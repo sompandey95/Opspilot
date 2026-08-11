@@ -1,5 +1,6 @@
 """Admin route tests — metrics module monkeypatched (SQL readers are exercised
 against real Postgres only in deployment), window parsing, error → 503."""
+import asyncio
 import uuid
 
 import httpx
@@ -9,6 +10,7 @@ from fastapi import FastAPI
 
 from app.api import admin_routes
 from app.api.admin_routes import _parse_window, router
+from app.config import Settings
 
 
 @pytest.fixture
@@ -165,3 +167,35 @@ async def test_evals_trend_parses_versions(client, monkeypatch):
 async def test_evals_trend_requires_versions(client):
     resp = await client.get("/api/v1/admin/evals/trend?versions=,")
     assert resp.status_code == 400
+
+
+async def test_evals_run_503_without_azure_creds(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "get_settings", lambda: Settings(_env_file=None))
+    resp = await client.post("/api/v1/admin/evals/run")
+    assert resp.status_code == 503
+
+
+async def test_evals_run_202_starts_background_job(client, monkeypatch):
+    monkeypatch.setattr(
+        admin_routes,
+        "get_settings",
+        lambda: Settings(
+            _env_file=None, AZURE_OPENAI_API_KEY="k", AZURE_OPENAI_ENDPOINT="https://x"
+        ),
+    )
+    calls = []
+
+    async def fake_job(payload):
+        calls.append(payload)
+
+    monkeypatch.setattr(admin_routes, "_run_eval_job", fake_job)
+    resp = await client.post(
+        "/api/v1/admin/evals/run", json={"subset": 5, "category": "faq_en"}
+    )
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "started"
+
+    await asyncio.sleep(0)  # let the fire-and-forget task run
+    assert len(calls) == 1
+    assert calls[0].subset == 5
+    assert calls[0].category == "faq_en"

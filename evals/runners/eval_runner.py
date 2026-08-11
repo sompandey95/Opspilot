@@ -325,7 +325,9 @@ class EvalRunner:
         gate("faithfulness_avg", metrics.get("faithfulness_avg"), s.EVAL_FAITHFULNESS_THRESHOLD, True)
         gate("hallucination_rate", metrics.get("hallucination_rate"), s.EVAL_HALLUCINATION_MAX, False)
         gate("tool_accuracy", metrics.get("tool_accuracy"), 0.85, True)
-        gate("retrieval_precision", metrics.get("retrieval_precision"), s.EVAL_RETRIEVAL_PRECISION_THRESHOLD, True)
+        # Recall, not precision: P@K is capped at relevant_count/K, which is
+        # usually << 1 for this dataset — see EVAL_RETRIEVAL_RECALL_THRESHOLD.
+        gate("retrieval_recall", metrics.get("retrieval_recall"), s.EVAL_RETRIEVAL_RECALL_THRESHOLD, True)
 
         evaluated = [c for c in checks if c["passed"] is not None]
         return {
