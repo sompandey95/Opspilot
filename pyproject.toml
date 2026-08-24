@@ -9,27 +9,28 @@ description = "OpsPilot service scaffold"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi",
-    "uvicorn[standard]",
-    "pydantic-settings",
-    "asyncpg",
-    "sqlalchemy[asyncio]",
-    "redis[hiredis]",
+    "fastapi==0.138.0",
+    "uvicorn[standard]==0.49.0",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "asyncpg==0.31.0",
+    "sqlalchemy[asyncio]==2.0.51",
+    "redis[hiredis]==8.0.1",
     "chromadb==1.5.9",
-    "openai",
-    "tiktoken",
-    "rank-bm25",
-    "sentence-transformers",
-    "alembic",
-    "httpx",
-    "jsonschema",
-    "numpy",
+    "openai==2.44.0",
+    "tiktoken==0.13.0",
+    "rank-bm25==0.2.2",
+    "sentence-transformers==5.6.0",
+    "alembic==1.18.4",
+    "httpx==0.28.1",
+    "jsonschema==4.26.0",
+    "numpy==2.5.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "pytest-asyncio",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
 ]
 
 [tool.setuptools.packages.find]

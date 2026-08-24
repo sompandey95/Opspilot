@@ -52,7 +52,7 @@ Health check: `GET /api/v1/health` · Retrieval debug: `GET /api/v1/rag/test?que
   LLM/network calls are mocked; order-service tools are tested against the real
   mock app via `httpx.ASGITransport`.
 
-## Current state (Phases 1–8 complete)
+## Current state (Phases 1–9 complete)
 
 ```
 app/
@@ -120,8 +120,9 @@ app/
   llm/client.py             # LLMClient: role → Azure deployment, normalized LLMResponse,
                             # per-call timeout, usage capture (all LLM access goes here)
   agent/
-    prompts/                # v1_system.txt, v2_system.txt (current) + current.txt
-                            # symlink; version → trace rows
+    prompts/                # v1, v2, v3_system.txt + current.txt symlink
+                            # (→ v3); version → trace rows. NOTE: v3 is live
+                            # but has NO eval run — see Phase 9 known drift.
     prompt_loader.py        # load_current_prompt() → (text, version)
     intent_classifier.py    # GPT-5.4-mini JSON classifier; never raises — falls back
                             # to action_complex + regex order-ID extraction
@@ -211,7 +212,23 @@ frontend/index.html         # self-contained dev console: chat tester, animated
                             # pipeline explainer, trace timeline, RAG explorer.
                             # Uses dev endpoints GET /api/v1/traces/{id} and
                             # /rag/test; CORS origins now via CORS_ALLOW_ORIGINS
-                            # (default * for local dev).
+                            # (default * for local dev). Backend URL is a config
+                            # field, not hardcoded — not baked into any image.
+docker-compose.yml          # all 5 services (postgres, redis, chromadb,
+                            # mock-order-service, app) with restart policies,
+                            # healthchecks, and app gated on depends_on:
+                            # service_healthy. Overrides the host-local
+                            # DATABASE_URL/REDIS_URL/CHROMA_HOST/ORDER_SERVICE_URL
+                            # from .env with in-network service names.
+Dockerfile                  # app image; non-root user + HEALTHCHECK
+.dockerignore               # keeps .git/tests/frontend/knowledge_base out of
+                            # the build context
+scripts/backup.sh           # pg_dump + chroma volume snapshot → backups/,
+                            # keeps last 14 (cron-driven; backups/ gitignored)
+.github/workflows/docker_build_push.yml  # main → build+push both images to GHCR
+DEPLOY.md                   # handover doc: required vs optional env vars, the
+                            # two unsafe-by-default security knobs, port
+                            # exposure, sizing, backups, mock-service caveat
 ```
 
 **Pinned mock orders** (eval scenarios MUST only reference these or other seeded
@@ -502,6 +519,72 @@ Original plan (for reference):
 5. README rewrite with *measured* numbers, demo recording, end-to-end
    walkthrough: `docker compose up` → ingest → chat → approve refund via HITL.
 
+## Phase 9 — Deployment packaging — ✅ DONE (2026-08-12)
+
+Not in the original roadmap. Added when the project needed to be handed to a
+DevOps engineer instead of run from a laptop: everything before this assumed
+`uvicorn` on localhost with the four support services in Compose.
+
+Delivered, with these deviations/decisions:
+
+- **The app is now a Compose service.** Previously `docker-compose.yml` held
+  only postgres/redis/chromadb/mock-order-service and the API was a manual
+  `uvicorn` command. `app` now waits on all four via `depends_on:
+  condition: service_healthy`.
+- **Compose overrides the connection URLs.** `.env` holds host-local values
+  (`localhost:5432`, …) which are wrong inside a container, so
+  `DATABASE_URL`/`REDIS_URL`/`CHROMA_HOST`/`ORDER_SERVICE_URL` are set to
+  in-network service names in the `app` service block. `.env` stays correct
+  for host-run `alembic upgrade head` and `scripts/ingest_knowledge.py`,
+  which are still meant to run from the host.
+- **ChromaDB's healthcheck can't use curl/wget/python** — none exist in that
+  image. It uses bash's `/dev/tcp` instead, and must invoke `bash` explicitly
+  (`CMD` + `bash -c`): `CMD-SHELL` runs under `/bin/sh` → dash, which has no
+  `/dev/tcp`. Both wrong versions were written and caught by actually running
+  them; the container sat in `starting` forever rather than failing loudly.
+- **Dependencies pinned** to the versions in the working venv. They were
+  entirely unpinned except `chromadb==1.5.9`, so a rebuild months later could
+  resolve a different FastAPI/openai/torch. `pydantic` added explicitly (it
+  was only arriving transitively).
+- **Both images run as non-root** with a `HEALTHCHECK`; `.dockerignore` added
+  (previously absent — builds shipped `.git/`, tests, and the knowledge base
+  into the context).
+- **`scripts/backup.sh`** — `pg_dump` + ChromaDB volume tar into
+  `backups/<timestamp>/`, keeps the last 14. Cron-driven, nothing calls it
+  automatically. `backups/` is gitignored — without that rule the dumps would
+  be committed.
+- **`docker_build_push.yml`** builds and pushes both images to GHCR on merge
+  to `main`. It deliberately does **not** deploy: where/how to deploy is
+  infra-specific and not decided in this repo.
+- **No TLS/reverse proxy, no secret manager, no IaC.** Documented in
+  `DEPLOY.md` as the deployer's decisions rather than half-implemented here.
+  `OPSPILOT_API_KEY=""` and `CORS_ALLOW_ORIGINS=["*"]` remain dev defaults —
+  nothing in the app warns when they're left as-is, so `DEPLOY.md` calls them
+  out as a manual pre-flight check.
+- New config knobs: **none** — this phase added no `Settings` fields, so
+  `.env.example` is unchanged.
+
+Verified: 301 tests pass; `docker compose config` validates; both images build
+and run as their non-root user; the `app` container reaches `healthy` and
+brings up RAG/HITL/guards/11 tools/agent/tracer.
+
+**Not** verified (stated rather than implied): a fully green `/health` — port
+6379 on the dev machine is held by an unrelated container, so the app resolved
+no Redis and reported `"redis": false`; `scripts/backup.sh` has never been
+executed; the frontend console has not been loaded against a live backend.
+
+### Known drift found during this phase (NOT fixed — decide before publishing)
+
+- **`current.txt` → `v3_system.txt`, but there is no v3 eval run.**
+  `evals/reports/runs/` holds v1 and v2 only, and both README and this file
+  described v2 as current (fixed above). v3 adds one rule — never construct,
+  pad, or auto-complete a partial number into a full `ORD-YYYY-NNNNN` ID —
+  committed in `3de25d8 "repsonse issues"`. Since the project's headline claim
+  is that every change is eval-gated, shipping an ungated prompt undercuts it:
+  either run the harness against v3 and publish the numbers, or point
+  `current.txt` back at v2 and keep v3 as a candidate.
+- README says 295 tests; the actual count is 301.
+
 ## Cross-phase invariants
 
 - Trace everything: any new agent/tool/guard step must append to the Trace.
@@ -509,3 +592,8 @@ Original plan (for reference):
 - Mock seed data, chunk IDs, and golden dataset must stay consistent —
   run `scripts/check_golden_dataset.py` after touching any of the three.
 - New config knobs: Settings default + `.env.example` + mention here.
+- New dependency: pin it in `pyproject.toml` (no floating versions). New
+  service: give it a `restart:` policy and a healthcheck in
+  `docker-compose.yml`, and record any required env var in `DEPLOY.md`.
+- Healthchecks must be *run*, not just written — a wrong `test:` command
+  leaves a container in `starting` forever instead of failing loudly.
