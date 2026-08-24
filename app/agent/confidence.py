@@ -31,8 +31,8 @@ _SHORT_ANSWER_PENALTY = 0.10
 _MIN_ANSWER_CHARS = 20
 # Asking the customer for missing info (e.g. an order ID) is the right move
 # when an action query gave the agent nothing to act on — not low confidence.
-# Detected by "?" or common info-request phrasings (incl. Hindi); Phase 5's
-# output guard replaces this heuristic with real claim extraction.
+# Detected by "?" or common information-request phrasing, including Hindi.
+# The output guard performs the final claim-grounding check.
 _CLARIFYING_QUESTION_BONUS = 0.25
 _INFO_REQUEST_PHRASES = (
     "please share", "please provide", "share your", "provide your",

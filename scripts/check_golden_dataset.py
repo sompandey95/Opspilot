@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Golden-dataset consistency checker — run before evals (and in CI).
 
-Guards the cross-phase invariant: mock seed data, chunker output, and the
+Guards the dataset invariant: mock seed data, chunker output, and the
 golden dataset must agree. Checks:
 
 - scenario schema: required fields, unique IDs, valid categories/intents/languages

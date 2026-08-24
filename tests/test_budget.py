@@ -8,7 +8,6 @@ from app.budget.token_budget import TokenBudget
 from app.config import Settings
 from app.observability.trace import Trace
 
-
 # --------------------------------------------------------------------- #
 # Pricing lookup                                                          #
 # --------------------------------------------------------------------- #

@@ -24,8 +24,8 @@ class ModelRole(str, Enum):
     AGENT = "agent"            # GPT-5.4 — complex multi-step reasoning
     AGENT_MINI = "agent_mini"  # GPT-5.4-mini — FAQ / simple actions
     CLASSIFIER = "classifier"  # GPT-5.4-mini — intent classification
-    SUMMARIZER = "summarizer"  # GPT-5.4-mini — session summaries (Phase 6)
-    JUDGE = "judge"            # GPT-4o — independent eval judge (Phase 7)
+    SUMMARIZER = "summarizer"  # GPT-5.4-mini — session summaries
+    JUDGE = "judge"            # GPT-4o — independent eval judge
 
 
 class LLMConfigError(Exception):

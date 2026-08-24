@@ -5,7 +5,6 @@ import uuid
 
 import httpx
 import pytest
-
 from fastapi import FastAPI
 
 from app.api import admin_routes

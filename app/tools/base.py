@@ -1,9 +1,7 @@
-"""Abstract Tool interface: every tool declares its risk profile up front.
+"""Abstract tool interface with risk, state, and argument metadata.
 
-- risk_level drives the HITL gate (Phase 5): HIGH tools block for approval.
-- is_state_changing drives idempotency protection in the agent loop (Phase 4).
-- parameters is a JSON schema used both for the LLM tool spec and for
-  argument validation (app/guardrails/schemas.py).
+Risk drives approval policy, state-changing tools receive retry protection,
+and the parameter schema is shared by the LLM tool spec and argument validator.
 """
 from __future__ import annotations
 

@@ -16,7 +16,7 @@ services:
       - "6379:6379"
 
   chromadb:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:1.5.9
     ports:
       - "8100:8000"
     volumes:

@@ -10,8 +10,6 @@ on:
       - "app/rag/retriever.py"
       - "app/rag/chunker.py"
       - "evals/golden_dataset/**"
-  schedule:
-    - cron: "0 3 * * *" # nightly — full current dataset
   workflow_dispatch: {}
 
 concurrency:
@@ -39,7 +37,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
       chromadb:
-        image: chromadb/chroma:latest
+        image: chromadb/chroma:1.5.9
         ports: ["8100:8000"]
     env:
       DATABASE_URL: postgresql+asyncpg://opspilot:opspilot@localhost:5432/opspilot
@@ -65,21 +63,25 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      # Forked PRs don't get repo secrets — skip the live-LLM gate rather than
-      # hard-failing a contributor's PR on a trust boundary they can't cross.
+      - name: Check golden dataset consistency
+        run: python scripts/check_golden_dataset.py
+
+      # Forked PRs do not receive repository secrets, so they may skip the live
+      # gate. Manual runs must execute it to report success.
       - name: Check Azure credentials
         id: creds
         run: |
           if [ -z "$AZURE_OPENAI_API_KEY" ] || [ -z "$AZURE_OPENAI_ENDPOINT" ]; then
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Azure OpenAI secrets not available (likely a fork PR) — skipping eval gate"
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "::warning::Azure OpenAI secrets unavailable — skipping the live gate for this PR"
+            else
+              echo "::error::Azure OpenAI secrets are required for manual eval runs"
+              exit 1
+            fi
           else
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Check golden dataset consistency
-        if: steps.creds.outputs.available == 'true'
-        run: python scripts/check_golden_dataset.py
 
       - name: Start mock order service
         if: steps.creds.outputs.available == 'true'
@@ -102,7 +104,7 @@ jobs:
         if: steps.creds.outputs.available == 'true' && github.event_name == 'pull_request'
         run: python scripts/run_evals.py --subset 30
 
-      - name: Run eval harness (scheduled/manual — full dataset)
+      - name: Run eval harness (manual — full dataset)
         if: steps.creds.outputs.available == 'true' && github.event_name != 'pull_request'
         run: python scripts/run_evals.py
 

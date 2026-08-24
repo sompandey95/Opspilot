@@ -16,12 +16,11 @@ from app.guardrails.output_guard import OutputGuard
 from app.guardrails.schemas import SchemaValidator
 from app.llm.client import Usage
 from app.tools.registry import build_default_registry
+from evals.reports.eval_report import to_markdown
+from evals.runners.eval_runner import EvalRunner, load_scenarios
 from mock_services.order_service import main as svc
 from mock_services.order_service.seed import build_store
 from tests.test_react_agent import FakeRedis, FixedConfidence, ScriptedLLM, answer, tool_call
-
-from evals.reports.eval_report import to_markdown
-from evals.runners.eval_runner import EvalRunner, load_scenarios
 
 SCENARIOS = load_scenarios("evals/golden_dataset/scenarios.json")
 PICKED_IDS = [

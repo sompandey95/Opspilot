@@ -69,6 +69,14 @@ def has_regressions(deltas: list[MetricDelta]) -> bool:
     return any(d.regressed for d in deltas)
 
 
+def _format_metric(value) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, float):
+        return f"{value:,.4f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
 def to_markdown(baseline: dict, candidate: dict, deltas: list[MetricDelta]) -> str:
     lines = [
         f"## Eval regression: `{baseline.get('prompt_version')}` → `{candidate.get('prompt_version')}`",
@@ -80,9 +88,11 @@ def to_markdown(baseline: dict, candidate: dict, deltas: list[MetricDelta]) -> s
         if d.baseline is None and d.candidate is None:
             continue
         flag = "🔴 regression" if d.regressed else ("🟢 improved" if d.improved else "")
-        fmt = lambda v: "—" if v is None else (f"{v:,.4f}".rstrip("0").rstrip(".") if isinstance(v, float) else str(v))
         delta_str = "—" if d.delta is None else f"{d.delta:+.4f}"
-        lines.append(f"| {d.metric} | {fmt(d.baseline)} | {fmt(d.candidate)} | {delta_str} | {flag} |")
+        lines.append(
+            f"| {d.metric} | {_format_metric(d.baseline)} | "
+            f"{_format_metric(d.candidate)} | {delta_str} | {flag} |"
+        )
     lines.append("")
     lines.append(
         "**Verdict:** " + ("🔴 regressions detected" if has_regressions(deltas) else "🟢 no regressions")

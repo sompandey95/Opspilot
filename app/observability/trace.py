@@ -1,8 +1,7 @@
-"""Per-request Trace: every thought, tool call, observation, and decision.
+"""Per-request trace for model, tool, guardrail, and approval activity.
 
-Phase 4 scope: in-memory accumulation + best-effort persist into the existing
-`traces` table (never raises — a dead DB must not break a customer reply).
-Phase 6 adds the full tracer/metrics layer on top of these rows.
+Persistence is best effort: a database failure must not suppress an otherwise
+valid customer response. Metrics aggregate the persisted rows.
 """
 from __future__ import annotations
 

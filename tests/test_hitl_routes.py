@@ -4,7 +4,6 @@ import uuid
 
 import httpx
 import pytest
-
 from fastapi import FastAPI
 
 from app.api.hitl_routes import router

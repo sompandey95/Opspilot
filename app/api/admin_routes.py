@@ -1,4 +1,4 @@
-"""Admin/read-only observability endpoints (Phase 6).
+"""Administrative observability and evaluation endpoints.
 
 All GET, all backed by app.observability.metrics (plus the HITL queue for the
 pending list). Protected by the API-key middleware like every non-exempt
@@ -12,10 +12,9 @@ import logging
 import uuid
 from pathlib import Path
 
-from pydantic import BaseModel
-
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.config import get_settings
 from app.db.postgres import fetch_one

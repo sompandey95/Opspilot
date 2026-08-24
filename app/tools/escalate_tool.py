@@ -1,6 +1,6 @@
 """Escalation tool — hands the conversation to a human supervisor.
 
-Phase 5: escalations are tracked as pending rows in the HITL queue
+Escalations are tracked as pending rows in the HITL queue
 (app/hitl/queue.py) so supervisors see them in GET /api/v1/hitl/pending, and
 Slack is notified when configured. If the queue is unavailable the tool
 degrades to Slack + logs only — an escalation must never fail outright.

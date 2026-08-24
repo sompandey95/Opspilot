@@ -1,4 +1,4 @@
-"""Risk-matrix HITL gate — replaces the Phase-4 AutoApproveHITLGate stub.
+"""Risk-matrix human-in-the-loop approval gate.
 
 Matrix (effective risk → behaviour):
     NONE    auto-approve

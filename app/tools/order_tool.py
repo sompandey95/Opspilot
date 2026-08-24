@@ -1,7 +1,7 @@
-"""Order-system tools backed by the mock order service (HTTP).
+"""Order-system tools backed by the deterministic local HTTP service.
 
-Read-only tools are LOW risk; process_refund and cancel_order are HIGH risk,
-state-changing, and will be intercepted by the HITL gate in Phase 5.
+Read-only tools are low risk. Refund and cancellation tools are high-risk,
+state-changing operations intercepted by the approval gate.
 """
 from __future__ import annotations
 

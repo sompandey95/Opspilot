@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Run the eval harness against the real agent.
+"""Run the eval harness against the configured agent.
 
 Prereqs: Azure OpenAI creds in .env, mock order service running
 (`uvicorn mock_services.order_service.main:app --port 8001`), and — for

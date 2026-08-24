@@ -1,11 +1,10 @@
 import hashlib
 import logging
 
-from pydantic import BaseModel, Field
-
 import httpx
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.db.postgres import get_pool
@@ -226,7 +225,7 @@ async def rag_test(
     request: Request,
     query: str = Query(..., description="Query to retrieve chunks for"),
 ) -> dict:
-    """Dev/debug endpoint — exercises the hybrid retriever. Will be removed later."""
+    """Diagnostic endpoint for inspecting hybrid retrieval results."""
     retriever = getattr(request.app.state, "retriever", None)
     if retriever is None:
         return {

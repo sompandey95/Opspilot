@@ -4,13 +4,11 @@ from collections import defaultdict
 
 import httpx
 import pytest
-from pydantic import BaseModel
-
 from fastapi import FastAPI, Request
+from pydantic import BaseModel
 
 from app.api.middleware import APIMiddleware
 from app.config import Settings
-
 
 # --------------------------------------------------------------------- #
 # Fake Redis (sorted-set pipeline used by the rate limiter)               #

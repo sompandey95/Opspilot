@@ -7,7 +7,6 @@ from app.rag.bm25_index import BM25Index
 from app.rag.retriever import HybridRetriever
 from app.rag.vector_store import RetrievalResult
 
-
 # ------------------------------------------------------------------ #
 # Fixtures / helpers                                                   #
 # ------------------------------------------------------------------ #

@@ -14,7 +14,6 @@ from app.hitl.queue import HITLQueue, HITLRequest
 from app.observability.trace import Trace
 from app.tools.registry import build_default_registry
 
-
 # --------------------------------------------------------------------- #
 # Fakes                                                                   #
 # --------------------------------------------------------------------- #

@@ -2,7 +2,7 @@
 
 Everything derives from random.seed(42) and a fixed ANCHOR date, so the same
 IDs, amounts, and statuses appear on every startup. Eval scenarios reference
-the PINNED orders below — never change their IDs or semantics (see CLAUDE.md).
+the pinned orders below, so their IDs and semantics form part of the dataset.
 """
 from __future__ import annotations
 
@@ -171,7 +171,7 @@ def _pinned_orders(customers: list[Customer]) -> list[Order]:
             delivery_eta=ANCHOR + timedelta(days=4),
             shipping_city=c1.city, shipping_pincode=c1.pincode,
         ),
-        # Delayed, card, ₹1,299 — matches the design doc's example trace
+        # Delayed card order used by the approval-flow walkthrough.
         Order(
             order_id="ORD-2024-78432", customer_id=c2.customer_id,
             product_name="Noise ColorFit Pro 4 Smartwatch", category="electronics",

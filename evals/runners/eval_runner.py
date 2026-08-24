@@ -1,7 +1,7 @@
-"""Run golden-dataset scenarios through the real pipeline and score them.
+"""Run golden-dataset scenarios through the application pipeline and score them.
 
 Mirrors production order per scenario: input guard → intent classifier →
-ReAct agent (real tools; the mock order service must be up for tool
+ReAct agent (registered tools; the mock order service must be up for tool
 scenarios) → output guard, then judges:
 
 - intent accuracy, HITL correctness, adversarial containment — deterministic
@@ -24,7 +24,6 @@ from pathlib import Path
 
 from app.budget.cost_calculator import CostCalculator
 from app.config import Settings, get_settings
-
 from evals.judges.hallucination import check_hallucination
 from evals.judges.tool_accuracy import score_tool_calls
 

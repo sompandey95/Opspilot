@@ -18,15 +18,6 @@ class Settings(BaseSettings):
     AZURE_DEPLOYMENT_GPT4O: str = ""
     AZURE_DEPLOYMENT_EMBEDDING: str = ""
 
-    MODEL_AGENT: str = ""
-    MODEL_CLASSIFIER: str = ""
-    MODEL_JUDGE: str = ""
-    MODEL_VERIFIER: str = ""
-    MODEL_GUARDRAILS: str = ""
-    MODEL_SUMMARIZER: str = "gpt-5.4-mini"
-    MODEL_QUERY_REWRITER: str = "gpt-5.4-mini"
-
-    EMBEDDING_MODEL: str = "text-embedding-3-large"
     EMBEDDING_DIMENSIONS: int = 3072
     RETRIEVAL_TOP_K: int = 10
     RERANK_TOP_K: int = 5
@@ -48,7 +39,6 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_JSON: bool = False
 
-    HITL_HIGH_RISK_ACTIONS: list[str] = Field(default_factory=list)
     HITL_REFUND_AUTO_APPROVE_LIMIT: float = 500.0
     HITL_APPROVAL_TIMEOUT_MINUTES: int = 30
     HITL_POLL_INTERVAL_SECONDS: float = 2.0
@@ -66,19 +56,14 @@ class Settings(BaseSettings):
 
     EVAL_FAITHFULNESS_THRESHOLD: float = 0.90
     EVAL_HALLUCINATION_MAX: float = 0.05
-    # Precision@K is reported but NOT gated: with K=5 and most golden scenarios
-    # having 1-3 relevant chunks, P@5 is capped at relevant_count/5 regardless
-    # of retrieval quality (measured ceiling ~0.35-0.40, nowhere near 0.85).
-    # Recall@K and MRR aren't capped that way, so they gate instead.
-    EVAL_RETRIEVAL_PRECISION_THRESHOLD: float = 0.85
     EVAL_RETRIEVAL_RECALL_THRESHOLD: float = 0.65
-
-    ENABLE_CHAIN_OF_VERIFICATION: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
+        # Ignore removed legacy keys in existing local .env files.
+        extra="ignore",
     )
 
 

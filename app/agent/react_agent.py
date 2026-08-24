@@ -87,7 +87,7 @@ class AutoApproveHITLGate:
                 "AutoApproveHITLGate approving high-risk tool '%s' without human review",
                 tool.name,
             )
-        return ApprovalDecision(status=ApprovalStatus.APPROVED, reason="phase4_stub_auto_approve")
+        return ApprovalDecision(status=ApprovalStatus.APPROVED, reason="fallback_auto_approve")
 
 
 class _PendingApproval(Exception):

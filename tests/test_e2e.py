@@ -19,6 +19,7 @@ import pytest
 import app.db.postgres as postgres_module
 from app.agent.intent_classifier import IntentClassifier
 from app.agent.react_agent import ReActAgent
+from app.budget.token_budget import TokenBudget
 from app.config import Settings
 from app.guardrails.output_guard import OutputGuard
 from app.guardrails.schemas import SchemaValidator
@@ -28,7 +29,6 @@ from app.hitl.queue import HITLQueue
 from app.llm.client import LLMResponse, Usage
 from app.main import create_app
 from app.observability.tracer import Tracer
-from app.budget.token_budget import TokenBudget
 from app.session.context_window import ContextWindow
 from app.session.manager import SessionManager
 from app.session.summarizer import SessionSummarizer

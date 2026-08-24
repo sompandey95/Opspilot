@@ -1,6 +1,4 @@
-"""Tracer: cost the trace, then persist it — the Phase-6 layer on top of
-Trace.persist(). Still best-effort end to end: a costing bug or dead DB is
-logged, never surfaced to the customer request."""
+"""Cost and persist traces without surfacing telemetry failures to customers."""
 from __future__ import annotations
 
 import logging

@@ -7,3 +7,9 @@ opspilot.egg-info/
 *.egg-info/
 .DS_Store
 evals/reports/runs/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+*.log

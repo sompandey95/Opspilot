@@ -21,7 +21,6 @@ from app.tools.registry import build_default_registry
 from mock_services.order_service import main as svc
 from mock_services.order_service.seed import build_store
 
-
 # --------------------------------------------------------------------- #
 # Fakes                                                                   #
 # --------------------------------------------------------------------- #
@@ -249,11 +248,15 @@ async def test_max_steps_exhausted_escalates(registry, settings):
 
 async def test_idempotent_replay_of_state_changing_tool(registry, settings):
     shared_redis = FakeRedis()
-    script = lambda: ScriptedLLM([
-        tool_call("process_refund",
-                  {"order_id": "ORD-2024-78432", "reason": "delivery_delayed"}),
-        answer("Refund of ₹1,299 processed."),
-    ])
+
+    def script():
+        return ScriptedLLM([
+            tool_call(
+                "process_refund",
+                {"order_id": "ORD-2024-78432", "reason": "delivery_delayed"},
+            ),
+            answer("Refund of ₹1,299 processed."),
+        ])
 
     agent1 = make_agent(script(), registry, settings, redis_client=shared_redis)
     result1 = await agent1.run("refund my late order ORD-2024-78432", intent())
@@ -299,7 +302,7 @@ async def test_read_only_tools_bypass_idempotency_cache(registry, settings):
 # HITL gate seam                                                          #
 # --------------------------------------------------------------------- #
 
-async def test_high_risk_tool_passes_through_stub_gate(registry, settings):
+async def test_high_risk_tool_passes_through_fallback_gate(registry, settings):
     llm = ScriptedLLM([
         tool_call("process_refund",
                   {"order_id": "ORD-2024-78432", "reason": "delivery_delayed"}),
@@ -312,7 +315,7 @@ async def test_high_risk_tool_passes_through_stub_gate(registry, settings):
     assert result.trace.hitl_triggered
     hitl_step = next(s for s in result.trace.steps if s["type"] == "hitl")
     assert hitl_step["status"] == "approved"
-    assert hitl_step["reason"] == "phase4_stub_auto_approve"
+    assert hitl_step["reason"] == "fallback_auto_approve"
 
 
 class RejectingGate:
