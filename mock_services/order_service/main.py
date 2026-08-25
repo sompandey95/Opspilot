@@ -1,7 +1,9 @@
 """Mock ShopEasy order/customer microservice (port 8001).
 
 Deterministic in-memory store seeded at import time; a restart resets all
-mutations. Dates are computed against seed.ANCHOR so behaviour is reproducible.
+mutations. Every date — fixtures and the return-window arithmetic below — is
+computed against seed.ANCHOR, which is the date the store was built. Restart
+the service to re-anchor it to the current date.
 """
 from __future__ import annotations
 

@@ -24,20 +24,36 @@ class ToolExecutionError(Exception):
 
 @dataclass
 class ToolResult:
+    """Outcome of a tool execution.
+
+    `not_found` marks the subset of unsuccessful results that are a definitive
+    answer rather than a malfunction: the record genuinely does not exist. The
+    tool did its job, so confidence scoring must not treat it as an execution
+    failure — telling a customer "no such order" is a correct resolution.
+    """
+
     success: bool
     data: dict | list | None = None
     error: str | None = None
+    not_found: bool = False
     from_cache: bool = field(default=False, compare=False)
 
     def to_message(self) -> str:
         """Serialise for the LLM 'tool' role message."""
         if self.success:
             return json.dumps({"success": True, "data": self.data}, default=str)
-        return json.dumps({"success": False, "error": self.error})
+        return json.dumps(
+            {"success": False, "error": self.error, "not_found": self.not_found}
+        )
 
     def to_json(self) -> str:
         return json.dumps(
-            {"success": self.success, "data": self.data, "error": self.error},
+            {
+                "success": self.success,
+                "data": self.data,
+                "error": self.error,
+                "not_found": self.not_found,
+            },
             default=str,
         )
 
@@ -48,6 +64,7 @@ class ToolResult:
             success=payload["success"],
             data=payload.get("data"),
             error=payload.get("error"),
+            not_found=payload.get("not_found", False),
             from_cache=True,
         )
 

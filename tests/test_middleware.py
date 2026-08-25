@@ -94,6 +94,10 @@ def build_app(settings: Settings, redis_client=None) -> FastAPI:
     async def other():
         return {"ok": True}
 
+    @app.get("/api/v1/admin/metrics")
+    async def admin_metrics():
+        return {"ok": True}
+
     app.add_middleware(APIMiddleware, settings=settings, redis_client=redis_client)
     return app
 
@@ -158,6 +162,19 @@ async def test_rate_limit_returns_429_past_the_window_cap():
             assert (await client.get("/api/v1/other")).status_code == 200
         resp = await client.get("/api/v1/other")
     assert resp.status_code == 429
+
+
+async def test_operator_polling_does_not_starve_customer_chat():
+    # The admin console and approval queue are polled on a timer. Sharing one
+    # bucket with /chat let an open dashboard 429 real conversations.
+    settings = Settings(_env_file=None, RATE_LIMIT_PER_MINUTE=2)
+    async with client_for(settings, redis_client=FakeRedis()) as client:
+        for _ in range(2):
+            assert (await client.get("/api/v1/admin/metrics")).status_code == 200
+        assert (await client.get("/api/v1/admin/metrics")).status_code == 429
+
+        chat = await client.post("/api/v1/chat", json={"query": "where is my order?"})
+    assert chat.status_code == 200
 
 
 async def test_rate_limiter_fails_open_when_redis_down():

@@ -1,11 +1,18 @@
 """Deterministic seed data: ~150 customers, 500 orders with realistic Indian data.
 
-Everything derives from random.seed(42) and a fixed ANCHOR date, so the same
-IDs, amounts, and statuses appear on every startup. Eval scenarios reference
-the pinned orders below, so their IDs and semantics form part of the dataset.
+Everything derives from random.seed(42), so the same IDs, amounts, and statuses
+appear on every startup. Eval scenarios reference the pinned orders below, so
+their IDs and semantics form part of the dataset.
+
+Every date is an offset from ANCHOR, the store's notion of "today". ANCHOR
+defaults to the real current date so that relative semantics ("delivered 2 days
+ago", "ETA 3 days out") stay true as time passes and match the date the agent
+is told in its prompt. Set MOCK_ANCHOR_DATE (ISO format) to pin it when a test
+or eval needs byte-stable absolute dates.
 """
 from __future__ import annotations
 
+import os
 import random
 from datetime import date, timedelta
 
@@ -18,8 +25,15 @@ from mock_services.order_service.models import (
     RefundStatus,
 )
 
-# Fixed "today" for deterministic relative dates (delivered 2 days ago, etc.)
-ANCHOR = date(2026, 8, 1)
+ANCHOR_DATE_ENV_VAR = "MOCK_ANCHOR_DATE"
+
+
+def resolve_anchor() -> date:
+    pinned = os.getenv(ANCHOR_DATE_ENV_VAR)
+    return date.fromisoformat(pinned) if pinned else date.today()
+
+
+ANCHOR = resolve_anchor()
 
 _FIRST_NAMES = [
     "Aarav", "Vivaan", "Aditya", "Arjun", "Sai", "Reyansh", "Krishna", "Ishaan",

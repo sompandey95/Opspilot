@@ -33,6 +33,8 @@ _EXEMPT_PATHS = {"/", "/docs", "/openapi.json", "/api/v1/health"}
 
 _CHAT_PATH = "/api/v1/chat"
 
+_OPERATOR_PATH_PREFIXES = ("/api/v1/admin", "/api/v1/hitl")
+
 
 class APIMiddleware:
     def __init__(
@@ -66,7 +68,7 @@ class APIMiddleware:
 
             client_host = scope["client"][0] if scope.get("client") else "unknown"
             client = headers.get("x-api-key") or client_host
-            if await self._rate_limited(client):
+            if await self._rate_limited(f"{self._bucket(path)}:{client}"):
                 await self._reply(scope, receive, send, 429, "Rate limit exceeded — try again in a minute")
                 return
 
@@ -81,6 +83,16 @@ class APIMiddleware:
     # ------------------------------------------------------------------ #
     # Auth + rate limit                                                    #
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _bucket(path: str) -> str:
+        """Rate-limit bucket for a path.
+
+        Operator surfaces (admin dashboard, approval queue) are polled on a
+        timer and must not spend the quota that customer chat needs — one
+        shared bucket lets an open console 429 real conversations.
+        """
+        return "operator" if path.startswith(_OPERATOR_PATH_PREFIXES) else "customer"
 
     def _authorized(self, headers: dict[str, str]) -> bool:
         expected = self._settings.OPSPILOT_API_KEY

@@ -23,6 +23,11 @@ from mock_services.order_service.seed import build_store
 from tests.test_react_agent import FakeRedis, FixedConfidence, ScriptedLLM, answer, tool_call
 
 SCENARIOS = load_scenarios("evals/golden_dataset/scenarios.json")
+
+# Read the ETA out of the fixture rather than hardcoding a date: the mock store
+# anchors its dates to the current day, so a literal here would silently turn
+# the scripted answer into an ungrounded claim once the calendar moved.
+ORD_55001_ETA = build_store()[1]["ORD-2024-55001"].delivery_eta.isoformat()
 PICKED_IDS = [
     "single_action_001",   # tool call → grounded answer
     "multi_step_002",      # 3-step refund chain, HITL expected
@@ -108,7 +113,7 @@ def build_runner(order_client, settings) -> EvalRunner:
     llm = RouterLLM({
         "Where is my order ORD-2024-55001": [
             tool_call("check_order_status", {"order_id": "ORD-2024-55001"}),
-            answer("Your order ORD-2024-55001 (₹1,499) is delayed — sorry! New ETA: 2026-08-05."),
+            answer(f"Your order ORD-2024-55001 (₹1,499) is delayed — sorry! New ETA: {ORD_55001_ETA}."),
         ],
         "no questions asked": [
             tool_call("check_refund_eligibility", {"order_id": "ORD-2024-54000"}),

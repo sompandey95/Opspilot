@@ -1,9 +1,10 @@
-"""Output guard: PII scrub, claim-grounding check, tone check.
+"""Output guard: PII scrub, duplicate collapse, claim-grounding check, tone check.
 
-Runs on the final agent response before it is returned to the customer.
-Only the PII scrub modifies the response; grounding and tone problems are
-recorded as guardrail flags on the trace (the eval harness and admin metrics
-consume them) — a support answer is never silently rewritten.
+Runs on the final agent response before it is returned to the customer. Only
+two mutations are allowed — the PII scrub and collapsing a paragraph the model
+emitted twice verbatim. Grounding and tone problems are recorded as guardrail
+flags on the trace (the eval harness and admin metrics consume them) — the
+substance of a support answer is never silently rewritten.
 
 Grounding: verifiable claims (₹ amounts, ISO dates, day/hour windows,
 percentages) in the response must appear somewhere in what the agent actually
@@ -27,10 +28,45 @@ _CLAIM_PATTERNS = [
     re.compile(r"\b\d+(?:\.\d+)?\s?%"),                       # percentages
 ]
 
+# Customer-facing answers are required to write dates as "23 Aug 2026", so an
+# ISO-only claim check never sees them. These are canonicalised to ISO digits
+# before grounding, letting "23 Aug 2026" match a "2026-08-23" tool result.
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+_DAY_FIRST_DATE = re.compile(r"\b(\d{1,2})\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b")
+_MONTH_FIRST_DATE = re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b")
+
 _EMPATHY_MARKERS = (
     "sorry", "apolog", "understand", "regret", "frustrat", "inconvenien",
     "appreciate your patience", "thank you for bearing",
 )
+
+# Only collapse repeats substantial enough to be a model stutter rather than a
+# legitimately recurring short line (a bare "Thanks!", a repeated list marker).
+_MIN_DUPLICATE_BLOCK_CHARS = 40
+
+
+def has_verifiable_claim(text: str) -> bool:
+    """True if the text asserts something checkable (amount, date, window, %)."""
+    return any(pattern.search(text) for pattern in _CLAIM_PATTERNS) or any(
+        _iter_month_name_dates(text)
+    )
+
+
+def _iter_month_name_dates(text: str):
+    """Yield (as_written, YYYYMMDD) for every month-name date in the text."""
+    for pattern, day_first in ((_DAY_FIRST_DATE, True), (_MONTH_FIRST_DATE, False)):
+        for match in pattern.finditer(text):
+            day, name = (
+                (match.group(1), match.group(2)) if day_first
+                else (match.group(2), match.group(1))
+            )
+            month = _MONTHS.get(name[:3].lower())
+            if month is None:
+                continue
+            yield match.group(0), f"{match.group(3)}{month:02d}{int(day):02d}"
 
 
 @dataclass
@@ -56,12 +92,56 @@ class OutputGuard:
         scrubbed, pii_flags = mask_pii(response)
         flags = [f"output_{f}" for f in pii_flags]
 
+        deduped = self._collapse_duplicate_blocks(
+            self._collapse_verbatim_repeat(scrubbed)
+        )
+        if deduped != scrubbed:
+            flags.append("duplicate_block_collapsed")
+            scrubbed = deduped
+
         flags.extend(self._unsupported_claims(response, trace))
 
         if sentiment == "angry" and not self._has_empathy(response):
             flags.append("tone_missing_empathy")
 
         return OutputGuardResult(response=scrubbed, flags=flags)
+
+    # ------------------------------------------------------------------ #
+    # Duplicate collapse                                                   #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _collapse_verbatim_repeat(response: str) -> str:
+        """Drop the second copy when the model emitted the whole reply twice.
+
+        The repeat is not reliably separated by a blank line, so every newline
+        boundary is tested as a candidate midpoint.
+        """
+        stripped = response.strip()
+        for separator in re.finditer(r"\n+", stripped):
+            head = stripped[: separator.start()].strip()
+            if len(_normalise(head)) < _MIN_DUPLICATE_BLOCK_CHARS:
+                continue
+            tail = stripped[separator.end():].strip()
+            if _normalise(head) == _normalise(tail):
+                return head
+        return response
+
+    @staticmethod
+    def _collapse_duplicate_blocks(response: str) -> str:
+        blocks = re.split(r"\n\s*\n", response)
+        if len(blocks) < 2:
+            return response
+
+        kept: list[str] = []
+        seen: set[str] = set()
+        for block in blocks:
+            key = _normalise(block)
+            if len(key) >= _MIN_DUPLICATE_BLOCK_CHARS and key in seen:
+                continue
+            seen.add(key)
+            kept.append(block)
+        return "\n\n".join(kept) if len(kept) != len(blocks) else response
 
     # ------------------------------------------------------------------ #
     # Claim grounding                                                      #
@@ -87,6 +167,16 @@ class OutputGuard:
                 )
                 if not grounded:
                     flags.append(f"unsupported_claim:{claim}")
+
+        for claim, iso_digits in _iter_month_name_dates(response):
+            if claim in seen:
+                continue
+            seen.add(claim)
+            grounded = (
+                iso_digits in context_digits or _normalise(claim) in context_norm
+            )
+            if not grounded:
+                flags.append(f"unsupported_claim:{claim}")
         return flags
 
     @staticmethod

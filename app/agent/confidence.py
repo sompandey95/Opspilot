@@ -12,8 +12,10 @@ Score < CONFIDENCE_THRESHOLD (0.7) ⇒ the agent auto-escalates.
 from __future__ import annotations
 
 import math
+import re
 
 from app.config import Settings
+from app.guardrails.output_guard import has_verifiable_claim
 from app.observability.trace import Trace
 
 _BASE = 0.5
@@ -30,15 +32,23 @@ _NEAR_MAX_STEPS_PENALTY = 0.10
 _SHORT_ANSWER_PENALTY = 0.10
 _MIN_ANSWER_CHARS = 20
 # Asking the customer for missing info (e.g. an order ID) is the right move
-# when an action query gave the agent nothing to act on — not low confidence.
-# Detected by "?" or common information-request phrasing, including Hindi.
-# The output guard performs the final claim-grounding check.
+# when a query gave the agent nothing to act on — not low confidence. Detected
+# by "?" or information-request phrasing (including Hindi), and only when the
+# answer asserts no checkable fact: a reply that states an amount, date, or
+# window is answering, not asking, so it stays subject to the grounding
+# penalties even if it ends with a question.
 _CLARIFYING_QUESTION_BONUS = 0.25
-_INFO_REQUEST_PHRASES = (
-    "please share", "please provide", "share your", "provide your",
-    "could you", "can you share", "i need your", "what is your",
-    "batayein", "bataiye", "share karein",
+_INFO_REQUEST_RE = re.compile(
+    r"please\s+(?:share|provide|paste|send|confirm|tell|enter|reply)"
+    r"|could\s+you|can\s+you\s+(?:share|provide|send)"
+    r"|i\s+need\s+(?:your|the)|what\s+is\s+your"
+    # The prompt tells the agent to quote this placeholder whenever it asks for
+    # an order ID, which makes it the most reliable request signal we have.
+    r"|ord-yyyy-nnnnn"
+    r"|batayein|bataiye|share\s+karein",
+    re.IGNORECASE,
 )
+_CLARIFIABLE_INTENTS = ("faq", "action_simple", "action_complex")
 
 
 def _sigmoid(x: float) -> float:
@@ -66,14 +76,23 @@ class ConfidenceScorer:
                 validation_failures += 1
             elif step_type in ("tool_result", "tool_error"):
                 tool_results += 1
-                if step_type == "tool_error" or not step.get("success", False):
+                unsuccessful = step_type == "tool_error" or not step.get("success", False)
+                # A "no such record" result is a definitive answer, not a
+                # malfunction — see ToolResult.not_found.
+                if unsuccessful and not step.get("not_found", False):
                     tool_failures += 1
                 retrieval_scores.extend(step.get("retrieval_scores") or [])
+
+        # Asking the customer for more information is not an answer, so it is
+        # exempt from the grounding penalties an answer would attract.
+        asks_for_info = (
+            "?" in answer or _INFO_REQUEST_RE.search(answer) is not None
+        ) and not has_verifiable_claim(answer)
 
         # Retrieval quality
         if retrieval_scores:
             score += _RETRIEVAL_MAX_BONUS * _sigmoid(max(retrieval_scores))
-        elif trace.intent == "faq" and tool_results == 0:
+        elif trace.intent == "faq" and tool_results == 0 and not asks_for_info:
             # A "faq" answer grounded in neither the knowledge base nor any
             # tool call is suspicious. But the intent classifier sometimes
             # tags an order-status question "faq" even though check_order_status
@@ -95,11 +114,11 @@ class ConfidenceScorer:
         if llm_steps >= self._max_steps - 1:
             score -= _NEAR_MAX_STEPS_PENALTY
 
-        # Clarifying question on an action query with nothing to act on
-        lowered = answer.lower()
-        asks_for_info = "?" in answer or any(p in lowered for p in _INFO_REQUEST_PHRASES)
+        # Clarifying question on a query with nothing to act on. "faq" is
+        # included because a one-word query like "refund" lands there, and
+        # asking what the customer wants to know beats paging a human.
         if (
-            trace.intent in ("action_simple", "action_complex")
+            trace.intent in _CLARIFIABLE_INTENTS
             and tool_results == 0
             and validation_failures == 0
             and asks_for_info

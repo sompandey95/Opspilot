@@ -118,6 +118,71 @@ def test_output_pii_scrubbed(output_guard):
 
 
 # --------------------------------------------------------------------- #
+# Output guard: duplicate collapse                                        #
+# --------------------------------------------------------------------- #
+
+def test_verbatim_repeated_paragraph_collapsed(output_guard):
+    para = (
+        "Could you share the full order ID in the format ORD-YYYY-NNNNN? "
+        "I can't look up a partial number."
+    )
+    trace = trace_with_context("my order is #78432, where is it?")
+    result = output_guard.check(f"{para}\n\n{para}", trace)
+    assert result.response == para
+    assert "duplicate_block_collapsed" in result.flags
+
+
+def test_whole_reply_repeated_after_single_newline_collapsed(output_guard):
+    # Observed shape: the model restates the entire message separated by one
+    # newline, so blank-line block splitting never sees a duplicate.
+    reply = (
+        "Could you share the full order ID in the format ORD-YYYY-NNNNN? "
+        "I can't look it up from a partial number."
+    )
+    trace = trace_with_context("my order is #78432, where is it?")
+    result = output_guard.check(f"{reply}\n{reply}", trace)
+    assert result.response == reply
+    assert "duplicate_block_collapsed" in result.flags
+
+
+def test_multi_paragraph_reply_repeated_collapsed(output_guard):
+    reply = (
+        "Could you please share the full order ID in the format ORD-YYYY-NNNNN?\n\n"
+        "I can't look it up from #78432 alone. You'll find it in My Orders."
+    )
+    trace = trace_with_context("my order is #78432, where is it?")
+    result = output_guard.check(f"{reply}\n{reply}", trace)
+    assert result.response == reply
+    assert "duplicate_block_collapsed" in result.flags
+
+
+def test_near_duplicate_wording_left_alone(output_guard):
+    reply = (
+        "Could you share the full order ID? I can't look it up from #78432.\n"
+        "Could you share the full order ID? You'll find it in My Orders."
+    )
+    trace = trace_with_context("my order is #78432, where is it?")
+    assert output_guard.check(reply, trace).response == reply
+
+
+def test_short_repeated_line_left_alone(output_guard):
+    response = "Thanks!\n\nThanks!"
+    trace = trace_with_context("ok")
+    result = output_guard.check(response, trace)
+    assert result.response == response
+    assert "duplicate_block_collapsed" not in result.flags
+
+
+def test_distinct_paragraphs_preserved(output_guard):
+    response = (
+        "Your order is on its way and should arrive shortly.\n\n"
+        "If it doesn't turn up, I can raise a delay ticket for you."
+    )
+    trace = trace_with_context("where is my order?")
+    assert output_guard.check(response, trace).response == response
+
+
+# --------------------------------------------------------------------- #
 # Output guard: claim grounding                                           #
 # --------------------------------------------------------------------- #
 
@@ -146,6 +211,36 @@ def test_fabricated_date_and_window_flagged(output_guard):
     flagged = [f for f in result.flags if f.startswith("unsupported_claim")]
     assert any("30 days" in f for f in flagged)
     assert not any("2026-08-09" in f for f in flagged)
+
+
+def test_month_name_date_matching_iso_tool_output_is_grounded(output_guard):
+    # The prompt requires "23 Aug 2026" phrasing, so an ISO-only claim check
+    # would never inspect a single customer-facing date.
+    trace = trace_with_context(
+        "when will it arrive?", json.dumps({"delivery_eta": "2026-08-27"})
+    )
+    result = output_guard.check("It should arrive by 27 Aug 2026.", trace)
+    assert not any(f.startswith("unsupported_claim") for f in result.flags)
+
+
+def test_month_name_date_contradicting_tool_output_is_flagged(output_guard):
+    trace = trace_with_context(
+        "am I inside the return window?", json.dumps({"delivered_on": "2026-08-23"})
+    )
+    result = output_guard.check("This order was delivered on 23 Jul 2026.", trace)
+    assert any("23 Jul 2026" in f for f in result.flags)
+
+
+def test_month_first_date_form_also_grounded(output_guard):
+    trace = trace_with_context("policy change?", json.dumps({"date": "2026-07-15"}))
+    result = output_guard.check("That took effect on July 15, 2026.", trace)
+    assert not any(f.startswith("unsupported_claim") for f in result.flags)
+
+
+def test_day_count_is_not_mistaken_for_a_date(output_guard):
+    trace = trace_with_context("return window?", json.dumps({"window_days": 10}))
+    result = output_guard.check("You have 10 days from delivery.", trace)
+    assert not any(f.startswith("unsupported_claim") for f in result.flags)
 
 
 def test_number_from_customer_query_counts_as_grounded(output_guard):

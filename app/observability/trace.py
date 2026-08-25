@@ -109,6 +109,7 @@ class Trace:
             "arguments": args,
             "success": result.success,
             "error": result.error,
+            "not_found": getattr(result, "not_found", False),
             "from_cache": result.from_cache,
             "data_preview": data_preview,
             "latency_ms": latency_ms,

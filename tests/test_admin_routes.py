@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from app.api import admin_routes
 from app.api.admin_routes import _parse_window, router
 from app.config import Settings
+from mock_services.order_service import main as svc
+from mock_services.order_service.seed import build_store
 
 
 @pytest.fixture
@@ -21,6 +23,27 @@ async def client():
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         c.app = app
         yield c
+
+
+@pytest.fixture
+def fresh_store():
+    customers, orders = build_store()
+    svc.CUSTOMERS.clear()
+    svc.CUSTOMERS.update(customers)
+    svc.ORDERS.clear()
+    svc.ORDERS.update(orders)
+    yield
+
+
+def _order_service_asgi_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=svc.app), base_url="http://order-service"
+    )
+
+
+@pytest.fixture
+def order_service(fresh_store, monkeypatch):
+    monkeypatch.setattr(admin_routes, "_order_service_client", _order_service_asgi_client)
 
 
 # --------------------------------------------------------------------- #
@@ -198,3 +221,72 @@ async def test_evals_run_202_starts_background_job(client, monkeypatch):
     assert len(calls) == 1
     assert calls[0].subset == 5
     assert calls[0].category == "faq_en"
+
+
+# --------------------------------------------------------------------- #
+# Demo order fixtures                                                     #
+# --------------------------------------------------------------------- #
+
+async def test_demo_orders_reports_live_fixture_state(client, order_service):
+    resp = await client.get("/api/v1/admin/demo-orders")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["count"] == len(admin_routes._DEMO_ORDERS)
+    assert all(order["available"] for order in body["orders"])
+
+    walkthrough = next(o for o in body["orders"] if o["order_id"] == "ORD-2024-78432")
+    assert walkthrough["amount_inr"] == 1299.0
+    assert walkthrough["status"] == "delayed"
+    assert walkthrough["payment_method"] == "card"
+    assert walkthrough["refund_eligible"] is True
+    assert walkthrough["eligible_amount_inr"] == 1299.0
+
+
+async def test_demo_orders_marks_closed_return_window_not_refundable(client, order_service):
+    body = (await client.get("/api/v1/admin/demo-orders")).json()
+    closed = next(o for o in body["orders"] if o["order_id"] == "ORD-2024-52000")
+    assert closed["refund_eligible"] is False
+    assert closed["refund_reason"] == "return_window_closed"
+
+
+async def test_demo_orders_reflects_a_processed_refund(client, order_service):
+    async with _order_service_asgi_client() as service:
+        refund = await service.post(
+            "/orders/ORD-2024-78432/refund", json={"reason": "delivery delayed"}
+        )
+    assert refund.status_code == 200
+
+    body = (await client.get("/api/v1/admin/demo-orders")).json()
+    spent = next(o for o in body["orders"] if o["order_id"] == "ORD-2024-78432")
+    assert spent["status"] == "refunded"
+    assert spent["refund_status"] == "processing"
+    assert spent["refund_eligible"] is False
+    assert spent["refund_reason"] == "already_refunded"
+
+
+async def test_demo_orders_marks_unknown_fixture_unavailable(client, order_service, monkeypatch):
+    monkeypatch.setattr(
+        admin_routes,
+        "_DEMO_ORDERS",
+        (("ORD-2024-78432", "known"), ("ORD-2024-00000", "missing")),
+    )
+    body = (await client.get("/api/v1/admin/demo-orders")).json()
+    by_id = {o["order_id"]: o for o in body["orders"]}
+    assert by_id["ORD-2024-78432"]["available"] is True
+    assert by_id["ORD-2024-00000"]["available"] is False
+    assert "404" in by_id["ORD-2024-00000"]["error"]
+
+
+async def test_demo_orders_503_when_order_service_unreachable(client, monkeypatch):
+    def unreachable(request):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(
+        admin_routes,
+        "_order_service_client",
+        lambda: httpx.AsyncClient(
+            transport=httpx.MockTransport(unreachable), base_url="http://order-service"
+        ),
+    )
+    resp = await client.get("/api/v1/admin/demo-orders")
+    assert resp.status_code == 503

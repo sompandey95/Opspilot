@@ -12,6 +12,7 @@ import logging
 import uuid
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -29,6 +30,15 @@ _SCENARIOS_PATH = _REPO_ROOT / "evals" / "golden_dataset" / "scenarios.json"
 _REPORT_DIR = _REPO_ROOT / "evals" / "reports" / "runs"
 
 _MAX_WINDOW_HOURS = 24 * 90
+
+_DEMO_ORDERS = (
+    ("ORD-2024-55001", "Delayed UPI order — refund needs approval"),
+    ("ORD-2024-78432", "Delayed card order — ₹1,299 approval walkthrough"),
+    ("ORD-2024-51234", "Delivered inside the return window"),
+    ("ORD-2024-52000", "Delivered — return window closed"),
+    ("ORD-2024-53000", "Cancelled with a completed refund"),
+    ("ORD-2024-54000", "In transit, COD — not refund eligible"),
+)
 
 
 def _parse_window(last: str) -> float | None:
@@ -208,3 +218,59 @@ async def evals_run(payload: EvalRunRequest = EvalRunRequest()):
         "status": "started",
         "detail": "Running against the live agent — poll GET /api/v1/admin/evals/latest for results.",
     }
+
+
+def _order_service_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(base_url=get_settings().ORDER_SERVICE_URL, timeout=5.0)
+
+
+async def _fetch_demo_order(client: httpx.AsyncClient, order_id: str, label: str) -> dict:
+    entry = {"order_id": order_id, "label": label, "available": False}
+    try:
+        order_resp = await client.get(f"/orders/{order_id}")
+        if order_resp.status_code >= 400:
+            return {**entry, "error": f"order service returned {order_resp.status_code}"}
+        eligibility_resp = await client.get(f"/orders/{order_id}/refund-eligibility")
+    except httpx.HTTPError as exc:
+        return {**entry, "error": f"order service unreachable: {exc}"}
+
+    order = order_resp.json()
+    eligibility = eligibility_resp.json() if eligibility_resp.status_code < 400 else {}
+    refund = order.get("refund") or {}
+    return {
+        **entry,
+        "available": True,
+        "product_name": order.get("product_name"),
+        "status": order.get("status"),
+        "amount_inr": order.get("amount_inr"),
+        "payment_method": order.get("payment_method"),
+        "refund_status": refund.get("status"),
+        "refund_eligible": eligibility.get("eligible"),
+        "refund_reason": eligibility.get("reason"),
+        "eligible_amount_inr": eligibility.get("amount_inr"),
+    }
+
+
+@router.get("/demo-orders")
+async def demo_orders():
+    """Live state of the pinned mock-service fixtures the console demos use.
+
+    Mutations live in the order service's memory, so a fixture stays refunded
+    until that container restarts — this endpoint shows what is still usable.
+    """
+    try:
+        async with _order_service_client() as client:
+            orders = list(
+                await asyncio.gather(
+                    *(_fetch_demo_order(client, oid, label) for oid, label in _DEMO_ORDERS)
+                )
+            )
+    except Exception as exc:
+        return _unavailable("demo orders", exc)
+
+    if not any(order["available"] for order in orders):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Order service unavailable — no demo fixtures could be read"},
+        )
+    return {"count": len(orders), "orders": orders}

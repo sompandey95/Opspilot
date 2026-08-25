@@ -31,6 +31,10 @@ def tool_fail():
     return {"type": "tool_result", "tool": "t", "success": False}
 
 
+def tool_not_found():
+    return {"type": "tool_result", "tool": "t", "success": False, "not_found": True}
+
+
 def test_all_successful_action_flow_clears_threshold():
     trace = trace_with([llm_step(), tool_ok(), llm_step()])
     score = scorer().score("q", ANSWER, trace)
@@ -64,6 +68,15 @@ def test_faq_tagged_order_lookup_grounded_by_tool_not_penalised():
 def test_tool_failures_pull_below_threshold():
     trace = trace_with([llm_step(), tool_fail(), llm_step()])
     assert scorer().score("q", ANSWER, trace) < 0.7
+
+
+def test_not_found_lookup_is_not_treated_as_a_tool_failure():
+    # A valid-format order ID that doesn't exist: the tool worked and returned a
+    # definitive answer, so telling the customer must not be swapped for a
+    # canned escalation the way a genuine tool malfunction is.
+    trace = trace_with([llm_step(), tool_not_found(), llm_step()])
+    honest = "I couldn't find an order with that ID in our system."
+    assert scorer().score("where is ORD-2024-99999?", honest, trace) >= 0.7
 
 
 def test_partial_failure_stays_conservative():
@@ -107,6 +120,33 @@ def test_imperative_info_request_also_counts_as_clarifying():
     trace = trace_with([llm_step()], intent="action_simple")
     imperative = "Please share your ShopEasy order ID in the format ORD-YYYY-NNNNN."
     assert scorer().score("where is my order?", imperative, trace) >= 0.7
+
+
+def test_clarifying_question_on_bare_faq_query_clears_threshold():
+    # A one-word query like "refund" classifies as faq. Asking what the customer
+    # actually needs is the right move, not grounds for paging a human.
+    trace = trace_with([llm_step()], intent="faq")
+    question = "Happy to help with a refund — could you tell me which order it's for?"
+    assert scorer().score("refund", question, trace) >= 0.7
+
+
+def test_faq_answer_asserting_a_fact_is_still_penalised_despite_a_question_mark():
+    trace = trace_with([llm_step()], intent="faq")
+    ungrounded = "Electronics can be returned within 30 days. Anything else?"
+    assert scorer().score("return window?", ungrounded, trace) < 0.7
+
+
+def test_imperative_id_request_without_a_question_mark_counts_as_clarifying():
+    # Observed phrasings vary ("please paste it", "please send your full order
+    # ID") and often carry no question mark, so the exemption must not hinge on
+    # one fixed wording.
+    trace = trace_with([llm_step()], intent="action_simple")
+    for phrasing in (
+        "I can help with that, but I need the full order ID first. "
+        "Please paste it in the format ORD-YYYY-NNNNN exactly as shown.",
+        "Sure — I can help. Please send your full order ID in this format: ORD-YYYY-NNNNN.",
+    ):
+        assert scorer().score("my order is #78432, where is it?", phrasing, trace) >= 0.7
 
 
 def test_clarifying_bonus_not_applied_after_tool_use():

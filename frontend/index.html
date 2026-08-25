@@ -98,6 +98,7 @@
   .layout {
     display: grid; grid-template-columns: minmax(340px, 1.15fr) minmax(300px, 0.85fr);
     gap: 1.25rem; padding: 1.25rem 1.5rem; max-width: 1200px; margin: 0 auto;
+    align-items: start;
   }
   @media (max-width: 880px) { .layout { grid-template-columns: 1fr; } }
 
@@ -118,6 +119,23 @@
     cursor: pointer; letter-spacing: normal; text-transform: none;
   }
   .refresh:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  .panel.hero { border-top: 2px solid var(--accent); }
+  .panel.hero > .panel-head { font-size: var(--fs-1); }
+
+  details.panel { display: block; }
+  summary.panel-head { cursor: pointer; list-style: none; }
+  summary.panel-head::-webkit-details-marker { display: none; }
+  summary.panel-head::after {
+    content: "+"; color: var(--muted); font-weight: 700; font-size: var(--fs-1);
+    width: 1ch; text-align: center; flex: none;
+  }
+  details.panel:not([open]) > summary.panel-head { color: var(--muted); }
+  details.panel:not([open]) > summary.panel-head:hover { color: var(--ink); background: var(--code-bg); }
+  details.panel[open] > summary.panel-head::after { content: "\2212"; }
+  summary.panel-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .sumnote { font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--muted); }
+  .sumnote.alert { color: var(--warn); font-weight: 700; }
 
   /* ---------------- chat ---------------- */
   .scenarios { display: flex; flex-wrap: wrap; gap: 0.45rem; padding: 0.75rem 1rem 0.25rem; }
@@ -171,7 +189,7 @@
   button.ghost:disabled { opacity: 0.4; cursor: default; }
 
   /* ---------------- pipeline ---------------- */
-  .stages { display: flex; flex-direction: column; padding: 0.4rem 0.75rem; gap: 0; max-height: 620px; overflow-y: auto; }
+  .stages { display: flex; flex-direction: column; padding: 0.4rem 0.75rem; gap: 0; }
   .stage {
     border: none; border-bottom: 1px solid var(--border); border-left: 2px solid transparent;
     background: transparent; padding: 0.6rem 0.6rem 0.6rem 0.8rem; cursor: pointer; transition: border-color 0.15s, background 0.15s;
@@ -185,11 +203,23 @@
   .stage .file { margin-left: auto; font-size: var(--fs-0); color: var(--muted); text-align: right; }
   .stage .live { font-size: var(--fs-0); color: var(--muted); margin-top: 0.25rem; min-height: 1em; }
   .stage .live b { color: var(--accent); font-weight: 700; }
-  .stage.running { border-left-color: var(--accent); background: var(--accent-soft); }
+  .stage { position: relative; }
+  .stage .num { transition: color 0.15s; }
+  .stage.running { border-left-color: var(--accent); background: var(--accent-soft); animation: stagePulse 1.2s ease-in-out infinite; }
+  .stage.running .num, .stage.running .name { color: var(--accent); }
   .stage.done { border-left-color: var(--good); }
+  .stage.done .num { color: var(--good); }
+  .stage.skipped { border-left-color: var(--border); border-left-style: dashed; }
+  .stage.skipped .name, .stage.skipped .num, .stage.skipped .file { color: var(--muted); }
   .stage.selected { background: var(--code-bg); border-left-color: var(--accent); }
+  @keyframes stagePulse { 50% { background: transparent; } }
   @media (prefers-reduced-motion: reduce) { .stage.running { animation: none; } }
   .connector { display: none; }
+
+  .pipe-status { font-variant-numeric: tabular-nums; }
+  .pipe-status.running { color: var(--accent); }
+  .pipe-status.done { color: var(--good); }
+  .pipe-status.failed { color: var(--bad); }
 
   /* ---------------- explainer ---------------- */
   .explainer { padding: 1rem; font-size: var(--fs-1); display: none; border-top: 1px solid var(--border); background: var(--code-bg); }
@@ -199,7 +229,7 @@
     margin: 1rem 0 0.35rem; font-size: var(--fs-0); letter-spacing: 0.04em;
     text-transform: none; color: var(--muted); font-weight: 700;
   }
-  .explainer h4::before { content: "// "; color: var(--accent); }
+  .explainer h4 { border-left: 2px solid var(--accent); padding-left: 0.5rem; }
   .explainer p { margin: 0.4rem 0; font-family: var(--font-prose); }
   .explainer ul { margin: 0.3rem 0; padding-left: 1.2rem; font-family: var(--font-prose); }
   .explainer li { margin: 0.25rem 0; }
@@ -221,6 +251,11 @@
   }
   .ok { color: var(--good); } .bad { color: var(--bad); } .wr { color: var(--warn); }
   .empty { padding: 1.2rem; color: var(--muted); font-size: var(--fs-1); font-family: var(--font-prose); }
+
+  .tone-good { color: var(--good); } .tone-warn { color: var(--warn); }
+  .tone-bad { color: var(--bad); } .tone-info { color: var(--accent); }
+  .tone-mute { color: var(--muted); }
+  .st { font-weight: 700; }
 
   .ragbar { display: flex; gap: 0.5rem; padding: 0.9rem 1rem; }
   .ragbar input { flex: 1; padding: 0.55rem 0.8rem; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -247,7 +282,8 @@
   .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; padding: 0; border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
   .stat { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 0.8rem 1rem; background: var(--surface); }
   .stat .k { font-size: var(--fs-0); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
-  .stat .v { font-size: var(--fs-4); font-weight: 700; margin-top: 0.2rem; }
+  .stat .v { font-size: var(--fs-4); font-weight: 700; margin-top: 0.2rem; font-variant-numeric: tabular-nums; line-height: 1.25; }
+  .stat .sub { font-size: var(--fs-0); color: var(--muted); font-weight: 500; }
   .atable { width: 100%; border-collapse: collapse; font-size: var(--fs-1); }
   .atable th, .atable td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid var(--border); }
   .atable th { color: var(--muted); font-weight: 700; font-size: var(--fs-0); text-transform: uppercase; letter-spacing: 0.04em; }
@@ -261,8 +297,7 @@
   .badge.na { color: var(--muted); }
   .adminsec { border-top: 1px solid var(--border); }
   .adminsec:first-child { border-top: none; }
-  .adminsec .subhead { padding: 0.8rem 1rem 0.3rem; font-size: var(--fs-0); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
-  .adminsec .subhead::before { content: "// "; color: var(--accent); }
+  .adminsec .subhead { padding: 0.8rem 1rem 0.3rem; font-size: var(--fs-0); font-weight: 700; letter-spacing: 0.03em; color: var(--ink); }
 
   footer { text-align: center; color: var(--muted); font-size: var(--fs-0); padding: 1rem 0 2.5rem; }
 </style>
@@ -302,14 +337,15 @@
 </div>
 
 <div class="intro">
-  Every message you send travels the API pipeline on the right — all <b>10 stages are live</b>, from input guard to trace persistence.
-  <b>Click any stage</b> to learn how it works. The <b>HITL queue</b> and <b>admin snapshot</b> panels below are wired to the same
-  endpoints a human reviewer / on-call engineer would use.
+  Send a message and <b>watch it move through the pipeline</b> on the right — all 10 stages are real, from input guard to trace
+  persistence, and each one lights up as the request reaches it. Stages the request <b>skipped</b> are marked too: an escalation
+  never touches the LLM. <b>Click any stage</b> to read what it does and why it's built that way. The collapsed panels below —
+  trace, approval queue, fixtures, metrics, retrieval — are wired to the same endpoints a reviewer or on-call engineer would use.
 </div>
 
 <div class="layout">
   <!-- ============ CHAT ============ -->
-  <section class="panel">
+  <section class="panel hero">
     <div class="panel-head">Chat with the agent <span class="side" id="turn-count"></span></div>
     <div class="scenarios" id="scenarios"></div>
     <div class="thread" id="thread">
@@ -323,53 +359,73 @@
   </section>
 
   <!-- ============ PIPELINE ============ -->
-  <section class="panel">
-    <div class="panel-head">Request pipeline — click a layer to learn it</div>
+  <section class="panel hero">
+    <div class="panel-head">Request pipeline — click a layer to learn it
+      <span class="side pipe-status" id="pipe-status">idle</span>
+    </div>
     <div class="stages" id="stages"></div>
     <div class="explainer" id="explainer" aria-live="polite"></div>
   </section>
 </div>
 
-<!-- ============ HITL QUEUE ============ -->
-<div class="wide">
-  <section class="panel">
-    <div class="panel-head">Human-in-the-loop queue — approve or reject live
-      <span class="side"><button class="refresh" id="hitl-refresh">refresh</button></span>
-    </div>
-    <div id="hitl-out"><div class="empty">HIGH-risk tool calls (refund over ₹500, cancel, escalate) stop here for a human before they execute. Trigger the <b>refund flow</b> scenario, then approve or reject it right from this panel — <code>POST /api/v1/hitl/approve/&#123;id&#125;</code> / <code>/reject/&#123;id&#125;</code>.</div></div>
-  </section>
-</div>
-
 <!-- ============ TRACE TIMELINE ============ -->
 <div class="wide">
-  <section class="panel">
-    <div class="panel-head">Trace timeline — the agent's actual steps
-      <span id="trace-id" class="mono side"></span>
-    </div>
+  <details class="panel" id="sec-trace">
+    <summary class="panel-head">Trace timeline — the agent's actual steps
+      <span class="side sumnote" id="trace-sum">run a message first</span>
+    </summary>
     <div id="timeline"><div class="empty">After a chat response, the full trace (every thought, tool call, observation, HITL decision, cost) is fetched from Postgres via the admin trace endpoint and replayed here. This same data is what the eval harness scores.</div></div>
-  </section>
+  </details>
+</div>
+
+<!-- ============ HITL QUEUE ============ -->
+<div class="wide">
+  <details class="panel" id="sec-hitl">
+    <summary class="panel-head">Human-in-the-loop queue — approve or reject live
+      <span class="side sumnote" id="hitl-sum">nothing pending</span>
+    </summary>
+    <div id="hitl-out"><div class="empty">HIGH-risk tool calls (refund over ₹500, cancel, escalate) stop here for a human before they execute. Trigger the <b>refund flow</b> scenario, then approve or reject it right from this panel — <code>POST /api/v1/hitl/approve/&#123;id&#125;</code> / <code>/reject/&#123;id&#125;</code>.</div></div>
+    <div class="qactions" style="padding:0 1rem 0.9rem"><button class="refresh" id="hitl-refresh">refresh</button></div>
+  </details>
+</div>
+
+<!-- ============ DEMO FIXTURES ============ -->
+<div class="wide">
+  <details class="panel" id="sec-fixtures">
+    <summary class="panel-head">Demo order fixtures — current mock-service state
+      <span class="side sumnote" id="fixtures-sum">loading…</span>
+    </summary>
+    <div id="fixtures-out"><div class="empty">Loading…</div></div>
+    <div class="qactions" style="padding:0 1rem 0.9rem"><button class="refresh" id="fixtures-refresh">refresh</button></div>
+  </details>
 </div>
 
 <!-- ============ ADMIN SNAPSHOT ============ -->
 <div class="wide">
-  <section class="panel">
-    <div class="panel-head">Admin snapshot — cost, HITL, eval gate
-      <span class="side"><button class="refresh" id="admin-refresh">refresh</button> <span id="admin-updated" class="mono" style="margin-left:0.5rem;font-weight:500"></span></span>
-    </div>
+  <details class="panel" id="sec-admin">
+    <summary class="panel-head">Admin snapshot — cost, HITL, eval gate
+      <span class="side sumnote" id="admin-sum">loading…</span>
+    </summary>
     <div id="admin-out"><div class="empty">Loading…</div></div>
-  </section>
+    <div class="qactions" style="padding:0 1rem 0.9rem">
+      <button class="refresh" id="admin-refresh">refresh</button>
+      <span id="admin-updated" class="mono sumnote"></span>
+    </div>
+  </details>
 </div>
 
 <!-- ============ RAG EXPLORER ============ -->
 <div class="wide">
-  <section class="panel">
-    <div class="panel-head">RAG explorer — peek inside retrieval</div>
+  <details class="panel" id="sec-rag">
+    <summary class="panel-head">RAG explorer — peek inside retrieval
+      <span class="side sumnote">vector + BM25 → RRF → rerank, no LLM</span>
+    </summary>
     <div class="ragbar">
       <input id="rag-q" placeholder="e.g. electronics return window" aria-label="Retrieval test query">
       <button class="send" id="rag-go">Retrieve</button>
     </div>
     <div id="rag-out"><div class="empty">Runs the hybrid retriever directly (vector + BM25 → RRF → cross-encoder rerank) and shows the ranked chunks with scores — no LLM involved. Try <b>electronics return window</b>: the dated changelog should outrank the stale policy text.</div></div>
-  </section>
+  </details>
 </div>
 
 <footer>OpsPilot · hybrid RAG · tool execution · HITL &amp; guardrails · sessions/budget/observability · evaluation gate · API <span class="mono" id="api-base-label"></span> · development and operations console</footer>
@@ -381,6 +437,35 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&
 const renderMD = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^- (.+)$/gm, "• $1").replace(/\n/g, "<br>");
 const inr = (n) => "₹" + Number(n ?? 0).toFixed(2);
 const pct = (n) => (Number(n ?? 0) * 100).toFixed(1) + "%";
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+function dur(ms) {
+  const n = Number(ms ?? 0);
+  if (n < 1000) return Math.round(n) + " ms";
+  if (n < 60000) return (n / 1000).toFixed(1) + " s";
+  return (n / 60000).toFixed(1) + " min";
+}
+
+function tone(value, { good, bad, lowerIsBetter = false } = {}) {
+  if (value == null || Number.isNaN(Number(value))) return "tone-mute";
+  const v = Number(value);
+  if (lowerIsBetter) {
+    if (v <= good) return "tone-good";
+    return v >= bad ? "tone-bad" : "tone-warn";
+  }
+  if (v >= good) return "tone-good";
+  return v <= bad ? "tone-bad" : "tone-warn";
+}
+
+const STATUS_TONE = {
+  delivered: "tone-good", refunded: "tone-good",
+  in_transit: "tone-info", processing: "tone-info",
+  delayed: "tone-warn", cancelled: "tone-mute",
+};
+const DECISION_TONE = {
+  approved: "tone-good", auto_approved: "tone-mute",
+  rejected: "tone-bad", timeout: "tone-warn", expired: "tone-warn",
+};
 
 /* ---------------- connection config (persisted, no hardcoded localhost-only setup) ---------------- */
 const CFG_KEYS = { base: "opspilot.apiBase", key: "opspilot.apiKey", org: "opspilot.orgId" };
@@ -570,13 +655,78 @@ function selectStage(id) {
   ex.classList.add("open");
 }
 
-function setStageStates(state) {
-  STAGES.forEach(st => {
-    const el = $("st-" + st.id);
-    el.classList.remove("running", "done");
-    if (state === "running") el.classList.add("running");
-    if (state === "done") el.classList.add("done");
-  });
+/* The pre-agent stages really do complete in milliseconds and the agent loop is
+   where the latency lives, so the lead-in is animated while the request is in
+   flight and the tail is driven by what the trace actually recorded. `run` is a
+   generation counter: a new send invalidates an animation still in progress. */
+const LEAD_STAGES = ["api", "budget", "session", "classify", "route"];
+const TAIL_STAGES = ["tools", "confidence", "outputguard", "trace"];
+let pipelineRun = 0;
+
+function stageEl(id) { return $("st-" + id); }
+
+function setStage(id, state) {
+  const el = stageEl(id);
+  if (!el) return;
+  el.classList.remove("running", "done", "skipped");
+  if (state) el.classList.add(state);
+}
+
+function resetStages() {
+  pipelineRun += 1;
+  STAGES.forEach(st => setStage(st.id, null));
+  setPipeStatus("idle", "");
+  return pipelineRun;
+}
+
+function setPipeStatus(kind, text) {
+  const el = $("pipe-status");
+  el.className = "side pipe-status " + kind;
+  el.textContent = text || kind;
+}
+
+async function animateLeadIn(run) {
+  for (const id of LEAD_STAGES) {
+    if (run !== pipelineRun) return;
+    const st = STAGES.find(s => s.id === id);
+    setStage(id, "running");
+    setPipeStatus("running", `${st.num} ${st.name.toLowerCase()}`);
+    await sleep(140);
+    if (run !== pipelineRun) return;
+    setStage(id, "done");
+  }
+  if (run !== pipelineRun) return;
+  setStage("react", "running");
+  setPipeStatus("running", "06 agent loop — thinking…");
+}
+
+async function animateTail(run) {
+  const t = lastTrace;
+  const escalatedWithoutLLM = lastResponse && lastResponse.intent === "escalate";
+  setStage("react", escalatedWithoutLLM ? "skipped" : "done");
+  if (escalatedWithoutLLM) setStage("route", "done");
+
+  const usedTools = !!(t && t.steps && t.steps.some(s => s.type === "tool_result"));
+  for (const id of TAIL_STAGES) {
+    if (run !== pipelineRun) return;
+    const st = STAGES.find(s => s.id === id);
+    const skipped =
+      (id === "tools" && !usedTools) ||
+      (id === "confidence" && lastResponse && lastResponse.confidence == null);
+    setStage(id, "running");
+    setPipeStatus("running", `${st.num} ${st.name.toLowerCase()}`);
+    await sleep(130);
+    if (run !== pipelineRun) return;
+    setStage(id, skipped ? "skipped" : "done");
+  }
+  if (run !== pipelineRun) return;
+  setPipeStatus("done", t ? `done · ${dur(t.total_latency_ms)}` : "done");
+}
+
+function failPipeline() {
+  pipelineRun += 1;
+  STAGES.forEach(st => setStage(st.id, null));
+  setPipeStatus("failed", "request failed");
 }
 
 function annotateStages() {
@@ -601,9 +751,10 @@ async function send(forcedQuery) {
   if (!forcedQuery) $("input").value = "";
   $("send").disabled = true;
   addMsg("user", esc(q));
-  const pending = addMsg("bot pending", "thinking — budget → session → classify → route → agent loop → guard…");
-  setStageStates("running");
+  const pending = addMsg("bot pending", "thinking — watch the pipeline on the right…");
   lastResponse = null; lastTrace = null; annotateStages();
+  const run = resetStages();
+  const leadIn = animateLeadIn(run);
 
   try {
     const { ok, status, data } = await api("/chat", {
@@ -630,12 +781,13 @@ async function send(forcedQuery) {
     turnCount += 1;
     renderSession();
     await loadTrace(data.trace_id);
-    setStageStates("done");
+    await leadIn;
+    await animateTail(run);
     if (data.pending_approval) loadPending();
   } catch (err) {
     pending.remove();
     addMsg("bot escalated", `<b>Request failed:</b> ${esc(err.message)}<div class="meta"><span class="pill warn">check the API base/key in settings and that the backend is up</span></div>`);
-    setStageStates("");
+    failPipeline();
   } finally {
     $("send").disabled = false;
     annotateStages();
@@ -655,15 +807,21 @@ async function loadTrace(id) {
     lastTrace = data;
   } catch { lastTrace = null; return; }
 
-  $("trace-id").textContent = id;
   const t = lastTrace;
+  const llmSteps = t.steps.filter(s => s.type === "llm").length;
+  const toolSteps = t.steps.filter(s => s.type === "tool_result").length;
+  $("trace-sum").textContent =
+    `${id.slice(0, 8)} · ${llmSteps} LLM · ${toolSteps} tools · ${dur(t.total_latency_ms)}`
+    + (t.cost_inr != null ? ` · ${inr(t.cost_inr)}` : "");
+  $("sec-trace").open = true;
+
   const parts = [];
   parts.push(`<div class="tstep"><div class="ticon">REQ</div><div class="tbody"><div class="thead">
     <span>query</span><span class="soft">${esc(t.query)}</span></div>
     <div class="thead" style="margin-top:0.3rem"><span>intent ${esc(t.intent)}</span>
     <span class="soft">prompt ${esc(t.prompt_version)}</span>
     <span class="soft">${t.input_tokens} in / ${t.output_tokens} out tokens</span>
-    <span class="soft">${t.total_latency_ms} ms total</span>
+    <span class="soft">${dur(t.total_latency_ms)} total</span>
     ${t.cost_inr != null ? `<span class="soft">${inr(t.cost_inr)}</span>` : ""}
     ${t.guardrail_flags && t.guardrail_flags.length ? `<span class="wr">flags: ${t.guardrail_flags.map(esc).join(", ")}</span>` : ""}
     </div></div></div>`);
@@ -672,16 +830,16 @@ async function loadTrace(id) {
     const icon = TICONS[s.type] || "·";
     let head = "", body = "";
     if (s.type === "llm") {
-      const calls = (s.tool_calls || []).map(tc => `${tc.name}(${esc(JSON.stringify(tc.arguments))})`).join(", ");
-      head = `<span>LLM step ${s.step}</span><span class="soft">${esc(s.model)}</span><span class="soft">${s.latency_ms} ms · ${s.input_tokens}+${s.output_tokens} tok</span>`;
+      const calls = (s.tool_calls || []).map(tc => `${tc.name}(${JSON.stringify(tc.arguments)})`).join(", ");
+      head = `<span>LLM step ${s.step}</span><span class="soft">${esc(s.model)}</span><span class="soft">${dur(s.latency_ms)} · ${s.input_tokens}+${s.output_tokens} tok</span>`;
       if (s.thought) body += `<pre>${esc(s.thought)}</pre>`;
       if (calls) body += `<pre>→ wants: ${esc(calls)}</pre>`;
       if (!s.thought && !calls) body += `<pre class="soft">(no content — final empty turn)</pre>`;
     } else if (s.type === "tool_result") {
       head = `<span>${esc(s.tool)}</span>
-        <span class="${s.success ? "ok" : "bad"}">${s.success ? "success" : "failed"}</span>
+        <span class="${s.success ? "ok" : (s.not_found ? "wr" : "bad")}">${s.success ? "success" : (s.not_found ? "no such record — definitive answer" : "failed")}</span>
         ${s.from_cache ? '<span class="wr">idempotent cache hit — not re-executed</span>' : ""}
-        <span class="soft">${s.latency_ms} ms</span>`;
+        <span class="soft">${dur(s.latency_ms)}</span>`;
       body = `<pre>args: ${esc(JSON.stringify(s.arguments))}</pre>`;
       if (s.error) body += `<pre class="bad">${esc(s.error)}</pre>`;
       else if (s.data_preview) body += `<pre>${esc(s.data_preview.slice(0, 500))}${s.data_preview.length > 500 ? " …" : ""}</pre>`;
@@ -724,10 +882,17 @@ async function loadPending() {
 }
 
 function renderPending(items) {
+  const sum = $("hitl-sum");
+  sum.textContent = items.length
+    ? `${items.length} awaiting a human decision`
+    : "nothing pending";
+  sum.classList.toggle("alert", items.length > 0);
+
   if (!items.length) {
     $("hitl-out").innerHTML = `<div class="empty">Nothing pending. Trigger the <b>refund flow</b> scenario above (or any refund with no amount / over ₹500) to see a real approval request land here.</div>`;
     return;
   }
+  $("sec-hitl").open = true;
   $("hitl-out").innerHTML = `<div class="queue">${items.map(it => `
     <div class="qitem" data-id="${esc(it.id)}">
       <div class="qhead">
@@ -774,6 +939,65 @@ async function decide(id, approved, el) {
 }
 $("hitl-refresh").onclick = loadPending;
 
+function fixturePrompt(o) {
+  const id = o.order_id;
+  if (o.status === "delayed") return `${id} is very late. Check what's going on and process my refund.`;
+  if (o.status === "delivered") {
+    return o.refund_eligible
+      ? `My order ${id} arrived but I want to return it. Please refund it.`
+      : `Please refund order ${id}, I changed my mind.`;
+  }
+  if (o.status === "cancelled" || o.status === "refunded") return `Where is my refund for order ${id}?`;
+  return `Where is my order ${id}? It has not arrived yet.`;
+}
+
+async function loadFixtures() {
+  const { ok, status, data } = await api("/admin/demo-orders");
+  if (!ok || !data || !data.orders) {
+    $("fixtures-sum").textContent = "unavailable";
+    $("fixtures-out").innerHTML = `<div class="empty">Fixture state unavailable (${esc(status || "no connection")}) — the mock order service on port 8001 may be down.</div>`;
+    return;
+  }
+
+  const refundable = data.orders.filter(o => o.available && o.refund_eligible).length;
+  $("fixtures-sum").textContent = `${data.orders.length} orders · ${refundable} refundable now`;
+
+  const rows = data.orders.map(o => {
+    if (!o.available) {
+      return `<tr><td class="mono">${esc(o.order_id)}</td><td colspan="4">${esc(o.error || "unavailable")}</td><td></td></tr>`;
+    }
+    const badge = o.refund_eligible
+      ? `<span class="badge pass">refundable ${inr(o.eligible_amount_inr)}</span>`
+      : `<span class="badge na">${esc(o.refund_reason || "not eligible")}</span>`;
+    const stTone = STATUS_TONE[o.status] || "tone-mute";
+    return `<tr>
+      <td class="mono">${esc(o.order_id)}</td>
+      <td>${esc(o.product_name)}<div style="color:var(--muted);font-size:0.72rem">${esc(o.label)}</div></td>
+      <td><span class="st ${stTone}">${esc(o.status)}</span>${o.refund_status ? `<div class="mono" style="color:var(--muted);font-size:0.72rem">${esc(o.refund_status)}</div>` : ""}</td>
+      <td>${inr(o.amount_inr)}</td>
+      <td>${badge}</td>
+      <td><button class="ghost use" data-prompt="${esc(fixturePrompt(o))}">Use</button></td>
+    </tr>`;
+  }).join("");
+
+  $("fixtures-out").innerHTML = `<div style="overflow-x:auto"><table class="atable">
+      <tr><th>Order</th><th>Product</th><th>Status</th><th>Amount</th><th>Refund</th><th></th></tr>
+      ${rows}
+    </table></div>
+    <div class="adminsec"><div class="subhead">Replaying a fixture</div>
+      <div style="padding:0 1rem 0.9rem;color:var(--muted);font-size:0.78rem">
+        A refund persists in the order service's memory and in the Redis idempotency cache, so the
+        same request will not execute twice. Run <code>docker compose restart mock-order-service</code>
+        and <code>docker compose exec redis redis-cli FLUSHALL</code> to run it again from a clean state.
+      </div>
+    </div>`;
+
+  $("fixtures-out").querySelectorAll("button.use").forEach(b => {
+    b.onclick = () => { $("input").value = b.dataset.prompt; $("input").focus(); };
+  });
+}
+$("fixtures-refresh").onclick = loadFixtures;
+
 /* ---------------- admin snapshot ---------------- */
 const GATE = [
   { key: "tool_accuracy", label: "Tool accuracy", min: 0.85 },
@@ -794,15 +1018,22 @@ async function loadAdmin() {
 
   if (sum.ok) {
     const s = sum.data.summary || {};
+    const confTone = tone(s.avg_confidence, { good: 0.7, bad: 0.5 });
+    const escTone = tone(s.escalation_rate, { good: 0.10, bad: 0.25, lowerIsBetter: true });
+    const p99Tone = tone(s.p99_latency_ms, { good: 10000, bad: 30000, lowerIsBetter: true });
+    $("admin-sum").textContent =
+      `${s.total_traces ?? 0} traces · ${inr(s.total_cost_inr)} · ${pct(s.escalation_rate)} escalated`;
+
     parts.push(`<div class="adminsec"><div class="subhead">Last 24h</div><div class="grid3">
       <div class="stat"><div class="k">Traces</div><div class="v">${s.total_traces ?? 0}</div></div>
-      <div class="stat"><div class="k">Avg confidence</div><div class="v">${s.avg_confidence != null ? Number(s.avg_confidence).toFixed(2) : "—"}</div></div>
-      <div class="stat"><div class="k">P50 / P99 latency</div><div class="v">${Math.round(s.p50_latency_ms ?? 0)} / ${Math.round(s.p99_latency_ms ?? 0)} ms</div></div>
-      <div class="stat"><div class="k">Total cost</div><div class="v">${inr(s.total_cost_inr)}</div></div>
-      <div class="stat"><div class="k">Escalation rate</div><div class="v">${pct(s.escalation_rate)}</div></div>
-      <div class="stat"><div class="k">HITL rate</div><div class="v">${pct(s.hitl_rate)}</div></div>
+      <div class="stat"><div class="k">Avg confidence</div><div class="v ${confTone}">${s.avg_confidence != null ? Number(s.avg_confidence).toFixed(2) : "—"}</div><div class="sub">gate at 0.70</div></div>
+      <div class="stat"><div class="k">Latency p50</div><div class="v">${dur(s.p50_latency_ms)}</div><div class="sub">p99 <span class="${p99Tone}">${dur(s.p99_latency_ms)}</span></div></div>
+      <div class="stat"><div class="k">Total cost</div><div class="v">${inr(s.total_cost_inr)}</div><div class="sub">${s.total_traces ? inr((s.total_cost_inr ?? 0) / s.total_traces) + " per request" : "—"}</div></div>
+      <div class="stat"><div class="k">Escalation rate</div><div class="v ${escTone}">${pct(s.escalation_rate)}</div><div class="sub">handed to a human</div></div>
+      <div class="stat"><div class="k">HITL rate</div><div class="v tone-info">${pct(s.hitl_rate)}</div><div class="sub">approval required</div></div>
     </div></div>`);
   } else {
+    $("admin-sum").textContent = "unavailable";
     parts.push(`<div class="adminsec"><div class="empty">Metrics summary unavailable (${sum.status || "no connection"}) — Postgres may be down, or an API key is required.</div></div>`);
   }
 
@@ -818,7 +1049,7 @@ async function loadAdmin() {
     parts.push(`<div class="adminsec"><div class="subhead">HITL decisions (24h) · ${hitl.data.pending_count ?? 0} pending now</div>
       ${decisions.length ? `<div style="overflow-x:auto"><table class="atable">
         <tr><th>Decision</th><th>Count</th><th>Avg decision time</th></tr>
-        ${decisions.map(d => `<tr><td>${esc(d.decision)}</td><td>${d.count}</td><td>${Math.round(d.avg_decision_time_ms ?? 0)} ms</td></tr>`).join("")}
+        ${decisions.map(d => `<tr><td><span class="st ${DECISION_TONE[d.decision] || "tone-mute"}">${esc(d.decision)}</span></td><td>${d.count}</td><td>${dur(d.avg_decision_time_ms)}</td></tr>`).join("")}
       </table></div>` : `<div class="empty">No HITL decisions in this window.</div>`}
     </div>`);
   }
@@ -839,7 +1070,7 @@ async function loadAdmin() {
           ${badges}
         </div>
         <div class="gaterow" style="color:var(--muted);font-size:0.78rem">
-          avg latency ${Math.round(e.avg_latency_ms ?? 0)} ms · avg cost ${inr(e.avg_cost_inr)} · relevance ${e.relevance_avg != null ? Number(e.relevance_avg).toFixed(2) : "—"}
+          avg latency ${dur(e.avg_latency_ms)} · avg cost ${inr(e.avg_cost_inr)} · relevance ${e.relevance_avg != null ? Number(e.relevance_avg).toFixed(2) : "—"}
         </div>
       </div>
     </div>`);
@@ -854,6 +1085,7 @@ $("admin-refresh").onclick = loadAdmin;
 
 function refreshEverything() {
   health();
+  loadFixtures();
   loadPending();
   loadAdmin();
 }

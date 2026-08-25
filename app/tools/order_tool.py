@@ -43,7 +43,11 @@ class OrderServiceTool(Tool):
                 detail = response.json().get("detail", response.text)
             except ValueError:
                 detail = response.text
-            return ToolResult(success=False, error=f"{response.status_code}: {detail}")
+            return ToolResult(
+                success=False,
+                error=f"{response.status_code}: {detail}",
+                not_found=response.status_code == 404,
+            )
 
         return ToolResult(success=True, data=response.json())
 
